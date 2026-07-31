@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id          String    @id @default(uuid())
+  firebaseUid String    @unique @map("firebase_uid")
+  email       String    @unique
+  displayName String?   @map("display_name")
+  avatarUrl   String?   @map("avatar_url")
+  institution String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  subjects   Subject[]
+  recordings Recording[]
+
+  @@map("users")
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  color     String   @default("#6366F1")
+  icon      String   @default("folder")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordings Recording[]
+
+  @@index([userId])
+  @@map("subjects")
+}
+
+model Recording {
+  id               String   @id @default(uuid())
+  subjectId        String   @map("subject_id")
+  userId           String   @map("user_id")
+  title            String
+  status           String   @default("recording")
+  processingStatus String   @default("pending") @map("processing_status")
+  totalDurationMs  Int      @default(0) @map("total_duration_ms")
+  audioFormat      String   @default("aac") @map("audio_format")
+  chunkDurationMin Int      @default(15) @map("chunk_duration_min")
+  language         String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  subject    Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks     AudioChunk[]
+  transcript Transcript?
+  summary    Summary?
+
+  @@index([userId])
+  @@index([subjectId])
+  @@map("recordings")
+}
+
+model AudioChunk {
+  id             String   @id @default(uuid())
+  recordingId    String   @map("recording_id")
+  sequenceNumber Int      @map("sequence_number")
+  filePath       String?  @map("file_path")
+  cloudUrl       String?  @map("cloud_url")
+  durationMs     Int      @default(0) @map("duration_ms")
+  sizeBytes      Int      @default(0) @map("size_bytes")
+  status         String   @default("pending")
+  transcription  String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  recording Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@unique([recordingId, sequenceNumber])
+  @@index([recordingId])
+  @@map("audio_chunks")
+}
+
+model Transcript {
+  id              String   @id @default(uuid())
+  recordingId     String   @unique @map("recording_id")
+  content         String
+  format          String   @default("markdown")
+  language        String?
+  confidenceScore Float?   @map("confidence_score")
+  wordCount       Int      @default(0) @map("word_count")
+  verified        Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  recording Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  summary   Summary?
+
+  @@map("transcripts")
+}
+
+model Summary {
+  id           String   @id @default(uuid())
+  recordingId  String   @unique @map("recording_id")
+  transcriptId String   @unique @map("transcript_id")
+  content      String
+  pdfUrl       String?  @map("pdf_url")
+  pdfPath      String?  @map("pdf_path")
+  status       String   @default("pending")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  recording  Recording  @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  transcript Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@map("summaries")
+}
