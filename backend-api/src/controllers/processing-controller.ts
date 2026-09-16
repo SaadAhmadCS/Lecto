@@ -3,7 +3,6 @@ import { getProcessingStatus, getTranscriptContent, getSummaryContent } from '..
 import { processingQueue } from '../services/processing-queue.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 
-const DEV_USER_ID = 'dev-user-001';
 
 class ProcessingController {
   /**
@@ -14,7 +13,11 @@ class ProcessingController {
     reply: FastifyReply,
   ) {
     const { id } = request.params;
-    const userId = DEV_USER_ID;
+    const userId = request.userId;
+
+    if (!(await getProcessingStatus(id, userId))) {
+      return reply.status(404).send(errorResponse('NOT_FOUND', 'Recording not found'));
+    }
 
     // Check if already in queue
     if (processingQueue.isRecordingQueued(id)) {
@@ -44,7 +47,7 @@ class ProcessingController {
     reply: FastifyReply,
   ) {
     const { id } = request.params;
-    const userId = DEV_USER_ID;
+    const userId = request.userId;
 
     const status = await getProcessingStatus(id, userId);
     if (!status) {
@@ -62,7 +65,7 @@ class ProcessingController {
     reply: FastifyReply,
   ) {
     const { id } = request.params;
-    const userId = DEV_USER_ID;
+    const userId = request.userId;
 
     const transcript = await getTranscriptContent(id, userId);
     if (!transcript) {
@@ -80,7 +83,7 @@ class ProcessingController {
     reply: FastifyReply,
   ) {
     const { id } = request.params;
-    const userId = DEV_USER_ID;
+    const userId = request.userId;
 
     const summary = await getSummaryContent(id, userId);
     if (!summary) {

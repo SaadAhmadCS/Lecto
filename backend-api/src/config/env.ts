@@ -11,6 +11,10 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('*'),
   RATE_LIMIT_MAX: z.coerce.number().default(100),
   LOG_LEVEL: z.string().default('info'),
+  // Firebase project that issues the ID tokens the mobile app sends
+  FIREBASE_PROJECT_ID: z.string().default(''),
+  // 'true' lets requests without a token act as the seeded dev user (local scripts only)
+  AUTH_DEV_BYPASS: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
   // AI Provider switching: 'openai' | 'gemini' | 'auto' (try primary, fallback to other)
   AI_PROVIDER: z.enum(['openai', 'gemini', 'auto']).default('auto'),
   GEMINI_API_KEY: z.string().default(''),

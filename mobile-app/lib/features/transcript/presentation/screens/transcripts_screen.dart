@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
@@ -19,7 +20,7 @@ class TranscriptsScreen extends StatefulWidget {
 }
 
 class _TranscriptsScreenState extends State<TranscriptsScreen> {
-  final LectoApiClient _api = LectoApiClient();
+  late final LectoApiClient _api = context.read<LectoApiClient>();
   List<Map<String, dynamic>> _recordings = [];
   bool _isLoading = true;
   String? _error;
@@ -28,12 +29,6 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
   void initState() {
     super.initState();
     _loadRecordings();
-  }
-
-  @override
-  void dispose() {
-    _api.dispose();
-    super.dispose();
   }
 
   Future<void> _loadRecordings() async {

@@ -1,11 +1,14 @@
-import { FastifyRequest, FastifyReply } from 'fastify';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
+import { prisma } from '../config/database.js';
+import { env } from '../config/env.js';
+import { errorResponse } from '../utils/response.js';
 
-// Initialize Firebase Admin SDK
-// Uses Application Default Credentials or service account
+// Verifying ID tokens only needs the project ID — Firebase's public signing
+// keys are fetched automatically, so no service account is required.
 if (!getApps().length) {
-  initializeApp();
+  initializeApp(env.FIREBASE_PROJECT_ID ? { projectId: env.FIREBASE_PROJECT_ID } : undefined);
 }
 
 declare module 'fastify' {
@@ -14,30 +17,56 @@ declare module 'fastify' {
   }
 }
 
-export async function authMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply
-) {
-  // Skip auth for health check
-  if (request.url === '/health' || request.url === '/api/health') {
+const DEV_USER_ID = 'dev-user-001';
+const PUBLIC_ROUTES = new Set(['/health']);
+
+// Firebase UID → internal user ID. Users are never deleted while the
+// server runs, so the mapping can't go stale.
+const userIdCache = new Map<string, string>();
+
+export async function authMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  if (PUBLIC_ROUTES.has(request.routeOptions.url ?? '')) {
     return;
   }
 
   const authHeader = request.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    // For now, fall back to dev user if no auth header
-    // This allows gradual migration
-    request.userId = 'dev-user-001';
-    return;
+    // Local scripts (e.g. test-ai.ps1) can opt in to acting as the seeded dev user
+    if (env.AUTH_DEV_BYPASS) {
+      request.userId = DEV_USER_ID;
+      return;
+    }
+    return reply.status(401).send(errorResponse('UNAUTHORIZED', 'Missing bearer token'));
   }
 
-  const token = authHeader.substring(7);
+  let decodedToken: DecodedIdToken;
   try {
-    const decodedToken = await getAuth().verifyIdToken(token);
-    request.userId = decodedToken.uid;
+    decodedToken = await getAuth().verifyIdToken(authHeader.substring(7));
   } catch (error) {
-    // If token is invalid, fall back to dev user for now
-    // In production, this should return 401
-    request.userId = 'dev-user-001';
+    request.log.warn({ err: error }, 'Rejected Firebase ID token');
+    return reply.status(401).send(errorResponse('UNAUTHORIZED', 'Invalid or expired token'));
   }
+
+  request.userId = await resolveUserId(decodedToken);
+}
+
+/** Map a Firebase user to our users table, creating the row on first request. */
+async function resolveUserId(token: DecodedIdToken): Promise<string> {
+  const cached = userIdCache.get(token.uid);
+  if (cached) return cached;
+
+  const user = await prisma.user.upsert({
+    where: { firebaseUid: token.uid },
+    update: {},
+    create: {
+      firebaseUid: token.uid,
+      // email is required and unique; phone/anonymous accounts have none
+      email: token.email ?? `${token.uid}@users.lecto.invalid`,
+      displayName: token.name ?? null,
+      avatarUrl: token.picture ?? null,
+    },
+  });
+
+  userIdCache.set(token.uid, user.id);
+  return user.id;
 }

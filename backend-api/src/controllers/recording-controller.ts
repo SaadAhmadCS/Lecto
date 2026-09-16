@@ -71,6 +71,9 @@ export class RecordingController {
   ) {
     const recordingId = request.params.id;
 
+    // Verify ownership before writing anything to disk
+    await recordingService.getById(recordingId, request.userId);
+
     // Parse multipart form data (audio file + metadata fields)
     const data = await request.file();
     if (!data) {

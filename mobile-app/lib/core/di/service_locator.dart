@@ -1,6 +1,7 @@
 import 'package:get_it/get_it.dart';
 
 import '../network/api_client.dart';
+import '../services/auth_service.dart';
 import '../network/connectivity_service.dart';
 import '../network/upload_queue_service.dart';
 import '../permissions/permission_service.dart';
@@ -56,8 +57,10 @@ Future<void> initServiceLocator() async {
     () => RecordingDao(),
   );
 
-  // === API Client ===
+  // === Auth & API Client ===
+  sl.registerLazySingleton<AuthService>(() => AuthService());
+
   sl.registerLazySingleton<LectoApiClient>(
-    () => LectoApiClient(),
+    () => LectoApiClient(tokenProvider: () => sl<AuthService>().getIdToken()),
   );
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
@@ -19,7 +20,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final LectoApiClient _api = LectoApiClient();
+  late final LectoApiClient _api = context.read<LectoApiClient>();
   List<Map<String, dynamic>> _recentRecordings = [];
   int _totalRecordings = 0;
   bool _isLoading = true;
@@ -29,12 +30,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadDashboard();
-  }
-
-  @override
-  void dispose() {
-    _api.dispose();
-    super.dispose();
   }
 
   Future<void> _loadDashboard() async {

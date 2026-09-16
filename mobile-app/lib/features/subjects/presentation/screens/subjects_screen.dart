@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -16,7 +17,7 @@ class SubjectsScreen extends StatefulWidget {
 }
 
 class _SubjectsScreenState extends State<SubjectsScreen> {
-  final LectoApiClient _api = LectoApiClient();
+  late final LectoApiClient _api = context.read<LectoApiClient>();
   List<Map<String, dynamic>> _subjects = [];
   bool _isLoading = true;
   bool _hasError = false;
@@ -25,12 +26,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   void initState() {
     super.initState();
     _loadSubjects();
-  }
-
-  @override
-  void dispose() {
-    _api.dispose();
-    super.dispose();
   }
 
   Future<void> _loadSubjects() async {

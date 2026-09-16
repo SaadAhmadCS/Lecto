@@ -24,9 +24,6 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
   final hasCompletedOnboarding = prefs.getBool('hasCompletedOnboarding') ?? false;
-  
-  final authService = AuthService();
-  final isAuthenticated = authService.isSignedIn;
 
   // Initialize foreground service
   ForegroundRecordingService.init();
@@ -39,6 +36,7 @@ void main() async {
 
   // Initialize dependencies
   await initServiceLocator();
+  final isAuthenticated = sl<AuthService>().isSignedIn;
 
   runApp(LectoApp(
     hasCompletedOnboarding: hasCompletedOnboarding,
@@ -82,8 +80,8 @@ class LectoApp extends StatelessWidget {
         RepositoryProvider<LectoApiClient>.value(
           value: sl<LectoApiClient>(),
         ),
-        RepositoryProvider<AuthService>(
-          create: (_) => AuthService(),
+        RepositoryProvider<AuthService>.value(
+          value: sl<AuthService>(),
         ),
       ],
       child: MaterialApp.router(

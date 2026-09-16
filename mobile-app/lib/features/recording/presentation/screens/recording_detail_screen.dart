@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -30,7 +31,7 @@ class RecordingDetailScreen extends StatefulWidget {
 class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final LectoApiClient _api = LectoApiClient();
+  late final LectoApiClient _api = context.read<LectoApiClient>();
   Timer? _pollTimer;
 
   // State
@@ -55,7 +56,6 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   void dispose() {
     _pollTimer?.cancel();
     _tabController.dispose();
-    _api.dispose();
     super.dispose();
   }
 
