@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/network/api_client.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -251,6 +252,36 @@ class _RecordingScreenBody extends StatelessWidget {
 
           const SizedBox(height: AppSpacing.xxl),
 
+          // Approaching the 8-hour session limit (REC-016)
+          if (state.isNearMaxDuration)
+            Container(
+              margin: const EdgeInsets.fromLTRB(
+                AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm,
+              ),
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: AppColors.warningBg,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.timer_off_outlined,
+                      color: AppColors.warning, size: 18),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Recording stops automatically at 8 hours '
+                      '(${(AppConstants.maxRecordingDuration - state.totalDuration).inMinutes.clamp(0, 15)} min left)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.warning.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Low storage warning
           if (state.isStorageLow)
             Container(
@@ -370,7 +401,11 @@ class _RecordingScreenBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Notes are generated once the audio finishes uploading',
+              state.stoppedAtMaxDuration
+                  ? 'Stopped automatically at the 8-hour limit.\n'
+                      'Notes are generated once the audio finishes uploading'
+                  : 'Notes are generated once the audio finishes uploading',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
                 color: AppColors.accent,

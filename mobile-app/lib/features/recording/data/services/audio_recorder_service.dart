@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import 'storage_monitor_service.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/services/foreground_recording_service.dart';
 
 /// Core audio recording service for Lecto.
@@ -33,6 +34,8 @@ class AudioRecorderService {
   bool _isRecording = false;
   bool _isPaused = false;
   bool _isRotating = false;
+  bool _maxDurationWarned = false;
+  bool _maxDurationReached = false;
   String _recordingsBasePath = '';
 
   AudioRecorderService({required StorageMonitorService storageMonitor})
@@ -95,6 +98,8 @@ class AudioRecorderService {
     _currentRecordingId = recordingId;
     _currentChunkIndex = 0;
     _totalDuration = Duration.zero;
+    _maxDurationWarned = false;
+    _maxDurationReached = false;
     _chunkDuration = Duration.zero;
 
     final docsDir = await getApplicationDocumentsDirectory();
@@ -136,6 +141,8 @@ class AudioRecorderService {
               _chunkDuration >= Duration(minutes: _chunkDurationMinutes)) {
             _rotateChunk();
           }
+
+          _checkMaxDuration();
         }
       },
     );
@@ -242,6 +249,22 @@ class AudioRecorderService {
     } catch (e) {
       debugPrint('AudioRecorderService: Error stopping chunk: $e');
       return null;
+    }
+  }
+
+  /// Emit the 8-hour warning and limit events once each. The owner stops
+  /// the recording on [MaxDurationReachedEvent] so its normal stop flow
+  /// (final chunk upload, completion) runs.
+  void _checkMaxDuration() {
+    if (!_maxDurationWarned &&
+        _totalDuration >= AppConstants.maxRecordingWarningAt) {
+      _maxDurationWarned = true;
+      _eventController.add(const RecordingEvent.maxDurationWarning());
+    }
+    if (!_maxDurationReached &&
+        _totalDuration >= AppConstants.maxRecordingDuration) {
+      _maxDurationReached = true;
+      _eventController.add(const RecordingEvent.maxDurationReached());
     }
   }
 
@@ -354,6 +377,10 @@ sealed class RecordingEvent {
     required String reason,
   }) = ChunkDurationAdjustedEvent;
 
+  const factory RecordingEvent.maxDurationWarning() = MaxDurationWarningEvent;
+
+  const factory RecordingEvent.maxDurationReached() = MaxDurationReachedEvent;
+
   const factory RecordingEvent.error(String message) = RecordingErrorEvent;
 }
 
@@ -415,6 +442,14 @@ class ChunkDurationAdjustedEvent extends RecordingEvent {
     required this.newDurationMinutes,
     required this.reason,
   });
+}
+
+class MaxDurationWarningEvent extends RecordingEvent {
+  const MaxDurationWarningEvent();
+}
+
+class MaxDurationReachedEvent extends RecordingEvent {
+  const MaxDurationReachedEvent();
 }
 
 class RecordingErrorEvent extends RecordingEvent {

@@ -32,6 +32,7 @@ class RecordingInProgress extends RecordingBlocState {
   final int availableStorageMB;
   final bool isStorageLow;
   final bool isOnline;
+  final bool isNearMaxDuration;
 
   const RecordingInProgress({
     required this.recordingId,
@@ -44,6 +45,7 @@ class RecordingInProgress extends RecordingBlocState {
     this.availableStorageMB = -1,
     this.isStorageLow = false,
     this.isOnline = true,
+    this.isNearMaxDuration = false,
   });
 
   RecordingInProgress copyWith({
@@ -56,6 +58,7 @@ class RecordingInProgress extends RecordingBlocState {
     int? availableStorageMB,
     bool? isStorageLow,
     bool? isOnline,
+    bool? isNearMaxDuration,
   }) {
     return RecordingInProgress(
       recordingId: recordingId,
@@ -68,6 +71,7 @@ class RecordingInProgress extends RecordingBlocState {
       availableStorageMB: availableStorageMB ?? this.availableStorageMB,
       isStorageLow: isStorageLow ?? this.isStorageLow,
       isOnline: isOnline ?? this.isOnline,
+      isNearMaxDuration: isNearMaxDuration ?? this.isNearMaxDuration,
     );
   }
 
@@ -92,6 +96,7 @@ class RecordingInProgress extends RecordingBlocState {
         availableStorageMB,
         isStorageLow,
         isOnline,
+        isNearMaxDuration,
       ];
 }
 
@@ -137,6 +142,7 @@ class RecordingCompleted extends RecordingBlocState {
   final int totalChunks;
   final int totalPhotos;
   final String recordingPath;
+  final bool stoppedAtMaxDuration;
 
   const RecordingCompleted({
     required this.recordingId,
@@ -144,6 +150,7 @@ class RecordingCompleted extends RecordingBlocState {
     required this.totalChunks,
     required this.totalPhotos,
     required this.recordingPath,
+    this.stoppedAtMaxDuration = false,
   });
 
   @override
@@ -153,6 +160,7 @@ class RecordingCompleted extends RecordingBlocState {
         totalChunks,
         totalPhotos,
         recordingPath,
+        stoppedAtMaxDuration,
       ];
 }
 

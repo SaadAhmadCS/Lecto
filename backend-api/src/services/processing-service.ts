@@ -47,7 +47,7 @@ export async function processRecording(recordingId: string, userId: string): Pro
   await updateProcessingStatus(recordingId, 'transcribing');
 
   try {
-    await transcribeAllChunks(recordingId, recording.chunks);
+    await transcribeAllChunks(recordingId, recording.chunks, recording.language);
     await updateProcessingStatus(recordingId, 'transcribed');
   } catch (error) {
     console.error(`❌ Transcription failed for ${recordingId}:`, error);
@@ -87,6 +87,7 @@ export async function processRecording(recordingId: string, userId: string): Pro
 async function transcribeAllChunks(
   recordingId: string,
   chunks: Array<{ id: string; sequenceNumber: number; filePath: string | null; status: string; transcription: string | null }>,
+  language: string | null,
 ): Promise<void> {
   const totalChunks = chunks.length;
 
@@ -119,6 +120,7 @@ async function transcribeAllChunks(
         chunk.filePath,
         chunk.sequenceNumber,
         totalChunks,
+        language,
       );
 
       // Save transcription to chunk

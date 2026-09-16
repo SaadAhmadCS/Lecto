@@ -100,6 +100,8 @@ export class RecordingService {
         userId,
         subjectId,
         title,
+        // null = auto-detect
+        language: data.language && data.language !== 'auto' ? data.language : null,
         audioFormat: data.audioFormat,
         chunkDurationMin: data.chunkDurationMin,
         status: 'recording',

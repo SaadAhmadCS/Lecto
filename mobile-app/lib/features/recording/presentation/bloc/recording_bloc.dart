@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/permissions/permission_service.dart';
 import '../../data/local/recording_dao.dart';
@@ -44,6 +45,8 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
   int _completedChunks = 0;
   int _reportedChunkDurationMs = 0;
   String _currentTitle = '';
+  bool _isNearMaxDuration = false;
+  bool _stoppedAtMaxDuration = false;
 
   RecordingBloc({
     required AudioRecorderService recorderService,
@@ -68,6 +71,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
     on<DurationTickEvent>(_onDurationTick);
     on<ChunkCompletedBlocEvent>(_onChunkCompleted);
     on<StorageStatusChangedEvent>(_onStorageStatusChanged);
+    on<MaxDurationWarningBlocEvent>(_onMaxDurationWarning);
     on<RecordingErrorOccurredEvent>(_onError);
   }
 
@@ -97,6 +101,8 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
     _recordingId = recordingId;
     _completedChunks = 0;
     _reportedChunkDurationMs = 0;
+    _isNearMaxDuration = false;
+    _stoppedAtMaxDuration = false;
     _photoService.reset();
 
     // Persist recording to local DB (crash recovery)
@@ -143,6 +149,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       recordingId: recordingId,
       subjectId: event.subjectId,
       title: _currentTitle,
+      language: (await TranscriptionLanguage.load()).code,
     );
 
     emit(RecordingInProgress(recordingId: recordingId));
@@ -181,6 +188,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       completedChunks: current.completedChunks,
       photos: current.photos,
       availableStorageMB: current.availableStorageMB,
+      isNearMaxDuration: _isNearMaxDuration,
     ));
   }
 
@@ -254,6 +262,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       totalChunks: result.totalChunks,
       totalPhotos: _photoService.photos.length,
       recordingPath: result.recordingPath,
+      stoppedAtMaxDuration: _stoppedAtMaxDuration,
     ));
   }
 
@@ -389,6 +398,16 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
     ));
   }
 
+  void _onMaxDurationWarning(
+    MaxDurationWarningBlocEvent event,
+    Emitter<RecordingBlocState> emit,
+  ) {
+    _isNearMaxDuration = true;
+    if (state is RecordingInProgress) {
+      emit((state as RecordingInProgress).copyWith(isNearMaxDuration: true));
+    }
+  }
+
   void _onError(
     RecordingErrorOccurredEvent event,
     Emitter<RecordingBlocState> emit,
@@ -423,6 +442,11 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
           durationMs: duration.inMilliseconds,
           sizeBytes: sizeBytes,
         ));
+      case MaxDurationWarningEvent():
+        add(const MaxDurationWarningBlocEvent());
+      case MaxDurationReachedEvent():
+        _stoppedAtMaxDuration = true;
+        add(const StopRecordingEvent());
       case RecordingErrorEvent(:final message):
         add(RecordingErrorOccurredEvent(message));
       case RecordingStartedEvent():

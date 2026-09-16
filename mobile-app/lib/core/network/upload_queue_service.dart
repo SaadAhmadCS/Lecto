@@ -85,12 +85,17 @@ class UploadQueueService {
     required String recordingId,
     required String subjectId,
     required String title,
+    String? language,
   }) {
     _enqueue(UploadTask(
       id: '${recordingId}_create',
       type: UploadTaskType.createRecording,
       recordingId: recordingId,
-      metadata: {'subjectId': subjectId, 'title': title},
+      metadata: {
+        'subjectId': subjectId,
+        'title': title,
+        if (language != null) 'language': language,
+      },
     ));
   }
 
@@ -208,6 +213,7 @@ class UploadQueueService {
           id: task.recordingId,
           subjectId: task.metadata['subjectId'] as String,
           title: task.metadata['title'] as String,
+          language: task.metadata['language'] as String?,
         );
 
       case UploadTaskType.audioChunk:

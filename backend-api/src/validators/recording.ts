@@ -8,6 +8,8 @@ export const createRecordingSchema = z.object({
   // 'unsorted' resolves to the user's Unsorted subject (Quick Record)
   subjectId: z.union([z.string().uuid(), z.literal(UNSORTED_SUBJECT_ID)]),
   title: z.string().min(1).max(100).optional(),
+  // ISO-639-1 hint for speech-to-text, or 'auto' to detect
+  language: z.string().regex(/^(auto|[a-z]{2})$/).optional(),
   audioFormat: z.enum(['aac', 'm4a', 'wav']).default('aac'),
   chunkDurationMin: z.number().int().min(3).max(30).default(15),
 });

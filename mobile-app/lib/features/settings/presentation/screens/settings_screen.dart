@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -102,6 +103,7 @@ class SettingsScreen extends StatelessWidget {
             context,
             title: 'AI Processing',
             children: [
+              const _TranscriptionLanguageTile(),
               _SettingsTile(
                 icon: Icons.auto_awesome_rounded,
                 title: 'Auto-Process',
@@ -283,6 +285,69 @@ class _SettingsTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Picks the language hint sent with new recordings (TRX-015).
+class _TranscriptionLanguageTile extends StatefulWidget {
+  const _TranscriptionLanguageTile();
+
+  @override
+  State<_TranscriptionLanguageTile> createState() =>
+      _TranscriptionLanguageTileState();
+}
+
+class _TranscriptionLanguageTileState
+    extends State<_TranscriptionLanguageTile> {
+  TranscriptionLanguage _language = TranscriptionLanguage.auto;
+
+  @override
+  void initState() {
+    super.initState();
+    TranscriptionLanguage.load().then((language) {
+      if (mounted) setState(() => _language = language);
+    });
+  }
+
+  Future<void> _pickLanguage() async {
+    final picked = await showDialog<TranscriptionLanguage>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Transcription language'),
+        children: [
+          RadioGroup<TranscriptionLanguage>(
+            groupValue: _language,
+            onChanged: (value) => Navigator.of(ctx).pop(value),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final language in TranscriptionLanguage.values)
+                  RadioListTile<TranscriptionLanguage>(
+                    value: language,
+                    title: Text(language.label),
+                    subtitle: Text(language.description),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (picked == null || picked == _language) return;
+    await picked.save();
+    if (mounted) setState(() => _language = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsTile(
+      icon: Icons.translate_rounded,
+      title: 'Transcription Language',
+      subtitle: '${_language.label} · applies to new recordings',
+      onTap: _pickLanguage,
     );
   }
 }

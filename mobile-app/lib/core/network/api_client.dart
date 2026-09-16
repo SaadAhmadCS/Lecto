@@ -116,6 +116,7 @@ class LectoApiClient {
     required String id,
     required String subjectId,
     required String title,
+    String? language,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/v1/recordings'),
@@ -124,6 +125,7 @@ class LectoApiClient {
         'id': id,
         'subjectId': subjectId,
         'title': title,
+        if (language != null) 'language': language,
       }),
     );
     return _decode(response);

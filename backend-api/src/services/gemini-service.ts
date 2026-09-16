@@ -128,9 +128,18 @@ RULES:
 5. Do NOT add information not present in the transcript.
 6. Keep language clear and student-friendly.`;
 
+const LANGUAGE_NAMES: Record<string, string> = { en: 'English', ur: 'Urdu' };
+
+/** Prompt hint for a user-selected lecture language; empty for auto-detect. */
+function languageInstruction(language: string | null): string {
+  if (!language) return '';
+  const name = LANGUAGE_NAMES[language] ?? language;
+  return `\n\nLANGUAGE: The lecture is primarily in ${name}.`;
+}
+
 // ─── Gemini Provider ───────────────────────────────────────────────
 
-async function geminiTranscribe(audioFilePath: string, chunkIndex: number, totalChunks: number): Promise<string> {
+async function geminiTranscribe(audioFilePath: string, chunkIndex: number, totalChunks: number, language: string | null): Promise<string> {
   if (!gemini) throw new Error('Gemini API key not configured');
 
   const audioData = await readFile(audioFilePath);
@@ -145,6 +154,7 @@ async function geminiTranscribe(audioFilePath: string, chunkIndex: number, total
   const contextNote = totalChunks > 1
     ? `\n\nCONTEXT: This is chunk ${chunkIndex + 1} of ${totalChunks} from a lecture recording. Maintain continuity with natural paragraph flow.`
     : '';
+  const languageNote = languageInstruction(language);
 
   const response = await gemini.models.generateContent({
     model: env.GEMINI_MODEL,
@@ -152,7 +162,7 @@ async function geminiTranscribe(audioFilePath: string, chunkIndex: number, total
       role: 'user',
       parts: [
         { inlineData: { mimeType, data: base64Audio } },
-        { text: `Transcribe this audio lecture recording into structured markdown.${contextNote}` },
+        { text: `Transcribe this audio lecture recording into structured markdown.${contextNote}${languageNote}` },
       ],
     }],
     config: {
@@ -194,7 +204,7 @@ async function geminiSummarize(fullTranscript: string, title: string, photoDescr
 
 // ─── OpenAI Provider ───────────────────────────────────────────────
 
-async function openaiTranscribe(audioFilePath: string, chunkIndex: number, totalChunks: number): Promise<string> {
+async function openaiTranscribe(audioFilePath: string, chunkIndex: number, totalChunks: number, language: string | null): Promise<string> {
   if (!openai) throw new Error('OpenAI API key not configured');
 
   // Step 1: Whisper for raw transcription
@@ -203,7 +213,8 @@ async function openaiTranscribe(audioFilePath: string, chunkIndex: number, total
     model: env.OPENAI_TRANSCRIPTION_MODEL,
     file,
     response_format: 'text',
-    language: 'en', // Whisper auto-detects but hint helps
+    // Omitted when null so Whisper auto-detects (e.g. English/Urdu mixes)
+    ...(language ? { language } : {}),
   });
 
   const rawText = typeof whisperResponse === 'string' ? whisperResponse : String(whisperResponse);
@@ -216,6 +227,7 @@ async function openaiTranscribe(audioFilePath: string, chunkIndex: number, total
   const contextNote = totalChunks > 1
     ? `\nThis is chunk ${chunkIndex + 1} of ${totalChunks} from a lecture recording.`
     : '';
+  const languageNote = languageInstruction(language);
 
   const structuredResponse = await openai.chat.completions.create({
     model: env.OPENAI_CHAT_MODEL,
@@ -223,7 +235,7 @@ async function openaiTranscribe(audioFilePath: string, chunkIndex: number, total
       { role: 'system', content: TRANSCRIPTION_SYSTEM_INSTRUCTION },
       {
         role: 'user',
-        content: `Structure this raw lecture transcription into clean, organized markdown. Preserve all content exactly — do not summarize or remove anything. Just add structure (headings, formatting, speaker labels where clear).${contextNote}\n\nRAW TRANSCRIPTION:\n${rawText}`,
+        content: `Structure this raw lecture transcription into clean, organized markdown. Preserve all content exactly — do not summarize or remove anything. Just add structure (headings, formatting, speaker labels where clear).${contextNote}${languageNote}\n\nRAW TRANSCRIPTION:\n${rawText}`,
       },
     ],
     temperature: 0.1,
@@ -329,11 +341,12 @@ export async function transcribeAudioChunk(
   audioFilePath: string,
   chunkIndex: number,
   totalChunks: number,
+  language: string | null = null,
 ): Promise<string> {
   return withFallback(
     `Transcribe chunk ${chunkIndex + 1}`,
-    () => geminiTranscribe(audioFilePath, chunkIndex, totalChunks),
-    () => openaiTranscribe(audioFilePath, chunkIndex, totalChunks),
+    () => geminiTranscribe(audioFilePath, chunkIndex, totalChunks, language),
+    () => openaiTranscribe(audioFilePath, chunkIndex, totalChunks, language),
   );
 }
 

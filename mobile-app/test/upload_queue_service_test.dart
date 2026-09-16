@@ -66,6 +66,7 @@ class FakeApiClient extends LectoApiClient {
     required String id,
     required String subjectId,
     required String title,
+    String? language,
   }) async {
     if (failCreateTimes > 0) {
       failCreateTimes--;

@@ -12,6 +12,10 @@ class AppConstants {
   static const int audioSampleRate = 44100;
   static const int audioBitRate = 128000;
 
+  // REC-016: sessions stop automatically at 8 hours, with a warning 15 min before
+  static const Duration maxRecordingDuration = Duration(hours: 8);
+  static const Duration maxRecordingWarningAt = Duration(hours: 7, minutes: 45);
+
   // Storage
   static const int storageWarningThresholdMB = 500;
   static const int storageCriticalThresholdMB = 100;

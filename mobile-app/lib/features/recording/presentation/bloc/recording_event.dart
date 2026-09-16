@@ -102,6 +102,11 @@ class StorageStatusChangedEvent extends RecordingBlocEvent {
   List<Object?> get props => [availableMB, isLow];
 }
 
+/// Internal: the session is 15 minutes from the 8-hour limit.
+class MaxDurationWarningBlocEvent extends RecordingBlocEvent {
+  const MaxDurationWarningBlocEvent();
+}
+
 /// Internal: an error occurred.
 class RecordingErrorOccurredEvent extends RecordingBlocEvent {
   final String message;
