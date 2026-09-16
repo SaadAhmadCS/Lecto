@@ -1,10 +1,12 @@
 import { prisma } from '../config/database.js';
-import { NotFoundError } from '../utils/errors.js';
+import { ConflictError, NotFoundError } from '../utils/errors.js';
 import { processingQueue } from './processing-queue.js';
-import type {
-  CreateRecordingInput,
-  UpdateRecordingInput,
-  ListRecordingsQuery,
+import { subjectService } from './subject-service.js';
+import {
+  UNSORTED_SUBJECT_ID,
+  type CreateRecordingInput,
+  type UpdateRecordingInput,
+  type ListRecordingsQuery,
 } from '../validators/recording.js';
 
 export class RecordingService {
@@ -62,6 +64,25 @@ export class RecordingService {
   }
 
   async create(userId: string, data: CreateRecordingInput) {
+    const include = {
+      subject: { select: { id: true, name: true, color: true } },
+    } as const;
+
+    // Idempotent for client-generated IDs: an offline recording is retried
+    // until it syncs, so a repeat create must return the existing row.
+    if (data.id) {
+      const existing = await prisma.recording.findUnique({
+        where: { id: data.id },
+        include,
+      });
+      if (existing) {
+        if (existing.userId !== userId) {
+          throw new ConflictError('Recording ID already in use');
+        }
+        return existing;
+      }
+    }
+
     // Auto-generate title if not provided
     const now = new Date();
     const title =
@@ -71,41 +92,46 @@ export class RecordingService {
         minute: '2-digit',
       })}`;
 
-    // Verify subject exists and belongs to user
-    const subject = await prisma.subject.findFirst({
-      where: { id: data.subjectId, userId },
-    });
+    let subjectId = data.subjectId;
+    if (subjectId === UNSORTED_SUBJECT_ID) {
+      subjectId = (await subjectService.getOrCreateUnsorted(userId)).id;
+    } else {
+      // Verify subject exists and belongs to user
+      const subject = await prisma.subject.findFirst({
+        where: { id: subjectId, userId },
+      });
 
-    if (!subject) {
-      throw new NotFoundError('Subject', data.subjectId);
+      if (!subject) {
+        throw new NotFoundError('Subject', subjectId);
+      }
     }
 
     return prisma.recording.create({
       data: {
+        id: data.id,
         userId,
-        subjectId: data.subjectId,
+        subjectId,
         title,
         audioFormat: data.audioFormat,
         chunkDurationMin: data.chunkDurationMin,
         status: 'recording',
       },
-      include: {
-        subject: { select: { id: true, name: true, color: true } },
-      },
+      include,
     });
   }
 
   async update(id: string, userId: string, data: UpdateRecordingInput) {
     // Verify ownership
-    await this.getById(id, userId);
+    const existing = await this.getById(id, userId);
 
     const updated = await prisma.recording.update({
       where: { id },
       data,
     });
 
-    // Auto-trigger processing when recording is completed
-    if (data.status === 'completed') {
+    // Auto-trigger processing when recording is completed. Only on the
+    // transition, so a retried completion request doesn't reprocess.
+    if (data.status === 'completed' && existing.status !== 'completed') {
       console.log(`🤖 Auto-processing triggered for recording ${id}`);
       processingQueue.enqueue(id, userId);
     }
@@ -133,7 +159,39 @@ export class RecordingService {
     },
   ) {
     // Verify recording ownership
-    const recording = await this.getById(recordingId, userId);
+    await this.getById(recordingId, userId);
+
+    // A retried upload (e.g. response lost on a flaky network) re-sends the
+    // same sequence number; update it instead of failing the unique index.
+    const existing = await prisma.audioChunk.findUnique({
+      where: {
+        recordingId_sequenceNumber: {
+          recordingId,
+          sequenceNumber: chunkData.sequenceNumber,
+        },
+      },
+    });
+    if (existing) {
+      const [chunk] = await prisma.$transaction([
+        prisma.audioChunk.update({
+          where: { id: existing.id },
+          data: {
+            filePath: chunkData.filePath,
+            durationMs: chunkData.durationMs,
+            sizeBytes: chunkData.sizeBytes,
+          },
+        }),
+        prisma.recording.update({
+          where: { id: recordingId },
+          data: {
+            totalDurationMs: {
+              increment: chunkData.durationMs - existing.durationMs,
+            },
+          },
+        }),
+      ]);
+      return chunk;
+    }
 
     const chunk = await prisma.audioChunk.create({
       data: {

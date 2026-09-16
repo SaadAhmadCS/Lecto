@@ -30,6 +30,7 @@ Future<void> initServiceLocator() async {
   sl.registerLazySingleton<UploadQueueService>(() {
     final service = UploadQueueService(
       connectivity: sl<ConnectivityService>(),
+      apiClient: sl<LectoApiClient>(),
     );
     service.initialize();
     return service;

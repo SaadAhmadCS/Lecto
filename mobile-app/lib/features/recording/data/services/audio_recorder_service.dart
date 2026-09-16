@@ -20,7 +20,6 @@ class AudioRecorderService {
   final AudioRecorder _recorder = AudioRecorder();
   final StorageMonitorService _storageMonitor;
 
-  Timer? _chunkTimer;
   Timer? _durationTimer;
   final _eventController = StreamController<RecordingEvent>.broadcast();
 
@@ -33,6 +32,7 @@ class AudioRecorderService {
   Duration _chunkDuration = Duration.zero;
   bool _isRecording = false;
   bool _isPaused = false;
+  bool _isRotating = false;
   String _recordingsBasePath = '';
 
   AudioRecorderService({required StorageMonitorService storageMonitor})
@@ -129,14 +129,15 @@ class AudioRecorderService {
           if (_totalDuration.inMilliseconds % 1000 < 200) {
             ForegroundRecordingService.updateDuration(_totalDuration);
           }
+
+          // Rotate on recorded time, not wall-clock time, so paused time
+          // doesn't stretch a chunk past the STT file-size limits.
+          if (!_isRotating &&
+              _chunkDuration >= Duration(minutes: _chunkDurationMinutes)) {
+            _rotateChunk();
+          }
         }
       },
-    );
-
-    // Start chunk timer
-    _chunkTimer = Timer.periodic(
-      Duration(minutes: _chunkDurationMinutes),
-      (_) => _rotateChunk(),
     );
 
     // Start amplitude monitoring
@@ -159,7 +160,6 @@ class AudioRecorderService {
 
     _isRecording = false;
     _isPaused = false;
-    _chunkTimer?.cancel();
     _durationTimer?.cancel();
 
     await ForegroundRecordingService.stopService();
@@ -247,8 +247,16 @@ class AudioRecorderService {
 
   /// Rotate to a new chunk (save current, start new).
   Future<void> _rotateChunk() async {
-    if (!_isRecording || _isPaused) return;
+    if (!_isRecording || _isPaused || _isRotating) return;
+    _isRotating = true;
+    try {
+      await _rotateChunkInner();
+    } finally {
+      _isRotating = false;
+    }
+  }
 
+  Future<void> _rotateChunkInner() async {
     debugPrint('AudioRecorderService: Rotating chunk $_currentChunkIndex');
 
     // Stop current chunk
@@ -271,11 +279,6 @@ class AudioRecorderService {
     );
     if (newChunkDuration != _chunkDurationMinutes) {
       _chunkDurationMinutes = newChunkDuration;
-      _chunkTimer?.cancel();
-      _chunkTimer = Timer.periodic(
-        Duration(minutes: _chunkDurationMinutes),
-        (_) => _rotateChunk(),
-      );
       _eventController.add(RecordingEvent.chunkDurationAdjusted(
         newDurationMinutes: _chunkDurationMinutes,
         reason: 'Low storage — chunks shortened',
@@ -304,7 +307,6 @@ class AudioRecorderService {
 
   /// Cancel and clean up everything.
   Future<void> dispose() async {
-    _chunkTimer?.cancel();
     _durationTimer?.cancel();
     if (_isRecording) {
       await _recorder.stop();

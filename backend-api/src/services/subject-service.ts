@@ -1,6 +1,8 @@
 import { prisma } from '../config/database.js';
-import { NotFoundError } from '../utils/errors.js';
+import { ConflictError, NotFoundError } from '../utils/errors.js';
 import type { CreateSubjectInput, UpdateSubjectInput } from '../validators/subject.js';
+
+export const UNSORTED_SUBJECT_NAME = 'Unsorted';
 
 export class SubjectService {
   async list(userId: string) {
@@ -57,9 +59,46 @@ export class SubjectService {
     });
   }
 
+  /**
+   * Find the user's "Unsorted" subject, creating it if needed.
+   * Used for Quick Record and for recordings orphaned by subject deletion.
+   */
+  async getOrCreateUnsorted(userId: string) {
+    const existing = await prisma.subject.findFirst({
+      where: { userId, name: UNSORTED_SUBJECT_NAME },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existing) return existing;
+
+    return this.create(userId, {
+      name: UNSORTED_SUBJECT_NAME,
+      color: '#6B7280',
+      icon: 'inbox',
+    });
+  }
+
   async delete(id: string, userId: string) {
     // Verify ownership
-    await this.getById(id, userId);
+    const subject = await this.getById(id, userId);
+
+    // Recordings cascade-delete with their subject, so move them to
+    // Unsorted first. Deleting Unsorted itself while it has recordings
+    // would destroy them, so refuse.
+    if (subject._count.recordings > 0) {
+      if (subject.name === UNSORTED_SUBJECT_NAME) {
+        throw new ConflictError(
+          'Move or delete the recordings in Unsorted before deleting it',
+        );
+      }
+      const unsorted = await this.getOrCreateUnsorted(userId);
+      return prisma.$transaction([
+        prisma.recording.updateMany({
+          where: { subjectId: id, userId },
+          data: { subjectId: unsorted.id },
+        }),
+        prisma.subject.delete({ where: { id } }),
+      ]);
+    }
 
     return prisma.subject.delete({
       where: { id },

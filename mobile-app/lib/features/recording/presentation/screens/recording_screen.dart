@@ -38,7 +38,6 @@ class RecordingScreen extends StatelessWidget {
         permissionService: context.read(),
         recordingDao: context.read(),
         uploadQueue: context.read(),
-        apiClient: context.read(),
       ),
       child: const _RecordingScreenBody(),
     );
@@ -365,7 +364,7 @@ class _RecordingScreenBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'AI processing started automatically',
+              'Notes are generated once the audio finishes uploading',
               style: TextStyle(
                 fontSize: 13,
                 color: AppColors.accent,

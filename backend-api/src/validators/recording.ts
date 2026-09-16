@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
+export const UNSORTED_SUBJECT_ID = 'unsorted';
+
 export const createRecordingSchema = z.object({
-  subjectId: z.string().uuid(),
+  // Client-generated ID so offline recordings keep the same ID once synced
+  id: z.string().uuid().optional(),
+  // 'unsorted' resolves to the user's Unsorted subject (Quick Record)
+  subjectId: z.union([z.string().uuid(), z.literal(UNSORTED_SUBJECT_ID)]),
   title: z.string().min(1).max(100).optional(),
   audioFormat: z.enum(['aac', 'm4a', 'wav']).default('aac'),
   chunkDurationMin: z.number().int().min(3).max(30).default(15),

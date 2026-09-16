@@ -74,16 +74,18 @@ class DurationTickEvent extends RecordingBlocEvent {
 class ChunkCompletedBlocEvent extends RecordingBlocEvent {
   final int chunkIndex;
   final String filePath;
+  final int durationMs;
   final int sizeBytes;
 
   const ChunkCompletedBlocEvent({
     required this.chunkIndex,
     required this.filePath,
+    required this.durationMs,
     required this.sizeBytes,
   });
 
   @override
-  List<Object?> get props => [chunkIndex, filePath, sizeBytes];
+  List<Object?> get props => [chunkIndex, filePath, durationMs, sizeBytes];
 }
 
 /// Internal: storage status changed.

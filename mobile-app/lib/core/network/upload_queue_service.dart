@@ -4,18 +4,22 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
+import '../../core/network/api_client.dart';
 import '../../core/network/connectivity_service.dart';
 
-/// Manages the offline-first upload queue for audio chunks and photos.
+/// Manages the offline-first sync queue for recordings.
 ///
-/// When online: uploads immediately after each chunk completes.
-/// When offline: queues items and auto-retries when connectivity returns.
-/// Implements exponential backoff for failed uploads.
+/// Each recording produces tasks in order: create → audio chunks → complete.
+/// Tasks run strictly FIFO and a failing task stays at the head while it
+/// retries, so the backend always sees a recording before its chunks, and
+/// completion (which triggers AI processing) only after every chunk.
+///
+/// When online: tasks run immediately.
+/// When offline: tasks wait and resume when connectivity returns.
 class UploadQueueService {
   final ConnectivityService _connectivity;
-  final String baseUrl;
+  final LectoApiClient _api;
   final Queue<UploadTask> _queue = Queue<UploadTask>();
   final List<UploadTask> _completed = [];
   final List<UploadTask> _failed = [];
@@ -27,8 +31,9 @@ class UploadQueueService {
 
   UploadQueueService({
     required ConnectivityService connectivity,
-    this.baseUrl = 'http://192.168.100.93:3000',
-  }) : _connectivity = connectivity;
+    required LectoApiClient apiClient,
+  })  : _connectivity = connectivity,
+        _api = apiClient;
 
   /// Stream of queue status updates.
   Stream<UploadQueueStatus> get statusStream => _statusController.stream;
@@ -48,20 +53,19 @@ class UploadQueueService {
     });
   }
 
-  /// Wait for all pending uploads to complete (or timeout).
-  /// Returns true if queue is empty, false if timed out.
-  Future<bool> waitForUploads({Duration timeout = const Duration(seconds: 30)}) async {
-    if (_queue.isEmpty && !_isProcessing) return true;
-
-    final deadline = DateTime.now().add(timeout);
-    while (_queue.isNotEmpty || _isProcessing) {
-      if (DateTime.now().isAfter(deadline)) {
-        debugPrint('UploadQueue: Timeout waiting for uploads (${_queue.length} remaining)');
-        return false;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
-    return true;
+  /// Enqueue creation of the recording on the backend.
+  /// Must be enqueued before any of the recording's chunks.
+  void enqueueCreateRecording({
+    required String recordingId,
+    required String subjectId,
+    required String title,
+  }) {
+    _enqueue(UploadTask(
+      id: '${recordingId}_create',
+      type: UploadTaskType.createRecording,
+      recordingId: recordingId,
+      metadata: {'subjectId': subjectId, 'title': title},
+    ));
   }
 
   /// Enqueue a chunk for upload.
@@ -72,7 +76,7 @@ class UploadQueueService {
     required int durationMs,
     required int sizeBytes,
   }) {
-    final task = UploadTask(
+    _enqueue(UploadTask(
       id: '${recordingId}_chunk_$sequenceNumber',
       type: UploadTaskType.audioChunk,
       recordingId: recordingId,
@@ -82,48 +86,35 @@ class UploadQueueService {
         'durationMs': durationMs,
         'sizeBytes': sizeBytes,
       },
-    );
-
-    _queue.add(task);
-    _emitStatus();
-    debugPrint('UploadQueue: Enqueued chunk $sequenceNumber for $recordingId');
-
-    // Try uploading immediately if online
-    if (_connectivity.isConnected && !_isProcessing) {
-      _processQueue();
-    }
+    ));
   }
 
-  /// Enqueue a photo for upload.
-  void enqueuePhoto({
+  /// Enqueue marking the recording completed, which starts AI processing.
+  /// Must be enqueued after the recording's final chunk.
+  void enqueueCompleteRecording({
     required String recordingId,
-    required String photoFilePath,
-    required String photoId,
-    required int timestampMs,
-    required int chunkIndex,
+    required int totalDurationMs,
   }) {
-    final task = UploadTask(
-      id: '${recordingId}_photo_$photoId',
-      type: UploadTaskType.photo,
+    _enqueue(UploadTask(
+      id: '${recordingId}_complete',
+      type: UploadTaskType.completeRecording,
       recordingId: recordingId,
-      filePath: photoFilePath,
-      metadata: {
-        'photoId': photoId,
-        'timestampMs': timestampMs,
-        'chunkIndex': chunkIndex,
-      },
-    );
+      metadata: {'totalDurationMs': totalDurationMs},
+    ));
+  }
 
+  void _enqueue(UploadTask task) {
     _queue.add(task);
     _emitStatus();
-    debugPrint('UploadQueue: Enqueued photo $photoId for $recordingId');
+    debugPrint('UploadQueue: Enqueued ${task.id}');
 
+    // Try immediately if online
     if (_connectivity.isConnected && !_isProcessing) {
       _processQueue();
     }
   }
 
-  /// Process the upload queue sequentially.
+  /// Process the queue sequentially.
   Future<void> _processQueue() async {
     if (_isProcessing || _queue.isEmpty) return;
     _isProcessing = true;
@@ -140,12 +131,12 @@ class UploadQueueService {
       _emitStatus();
 
       try {
-        await _uploadTask(task);
+        await _runTask(task);
         _queue.removeFirst();
         task.status = UploadTaskStatus.completed;
         _completed.add(task);
         _emitStatus();
-        debugPrint('UploadQueue: ✅ Uploaded ${task.id}');
+        debugPrint('UploadQueue: ✅ ${task.id}');
       } catch (e) {
         debugPrint('UploadQueue: ❌ Failed ${task.id} (attempt ${task.attempts}): $e');
 
@@ -156,10 +147,9 @@ class UploadQueueService {
           _emitStatus();
           debugPrint('UploadQueue: Task ${task.id} permanently failed after ${task.attempts} attempts');
         } else {
+          // Keep the task at the head so later tasks for the same recording
+          // don't run out of order.
           task.status = UploadTaskStatus.pending;
-          // Move to back of queue
-          _queue.removeFirst();
-          _queue.add(task);
           _emitStatus();
 
           // Exponential backoff before retrying
@@ -179,53 +169,33 @@ class UploadQueueService {
     }
   }
 
-  /// Upload a single task to the backend.
-  ///
-  /// Audio chunks: POST multipart with binary audio file + metadata fields
-  /// Photos: POST multipart with image file + metadata fields
-  Future<void> _uploadTask(UploadTask task) async {
-    // Verify file exists before uploading
-    final file = File(task.filePath);
-    if (!await file.exists()) {
-      throw UploadException('File not found: ${task.filePath}');
-    }
-
+  /// Run a single task against the backend. Throws on failure.
+  Future<void> _runTask(UploadTask task) async {
     switch (task.type) {
+      case UploadTaskType.createRecording:
+        await _api.createRecording(
+          id: task.recordingId,
+          subjectId: task.metadata['subjectId'] as String,
+          title: task.metadata['title'] as String,
+        );
+
       case UploadTaskType.audioChunk:
-        final request = http.MultipartRequest(
-          'POST',
-          Uri.parse('$baseUrl/api/v1/recordings/${task.recordingId}/chunks'),
-        );
-        // Metadata fields
-        request.fields['sequenceNumber'] = '${task.metadata['sequenceNumber']}';
-        request.fields['durationMs'] = '${task.metadata['durationMs']}';
-        // Actual audio binary
-        request.files.add(
-          await http.MultipartFile.fromPath('file', task.filePath),
-        );
-
-        final streamedResponse = await request.send();
-        if (streamedResponse.statusCode >= 400) {
-          final respBody = await streamedResponse.stream.bytesToString();
-          throw UploadException('Chunk upload failed (${streamedResponse.statusCode}): $respBody');
+        final filePath = task.filePath!;
+        if (!await File(filePath).exists()) {
+          throw UploadException('File not found: $filePath');
         }
-
-      case UploadTaskType.photo:
-        final request = http.MultipartRequest(
-          'POST',
-          Uri.parse('$baseUrl/api/v1/recordings/${task.recordingId}/photos'),
-        );
-        request.fields['timestampMs'] = '${task.metadata['timestampMs']}';
-        request.fields['chunkIndex'] = '${task.metadata['chunkIndex']}';
-        request.files.add(
-          await http.MultipartFile.fromPath('file', task.filePath),
+        await _api.uploadChunk(
+          recordingId: task.recordingId,
+          filePath: filePath,
+          sequenceNumber: task.metadata['sequenceNumber'] as int,
+          durationMs: task.metadata['durationMs'] as int,
         );
 
-        final streamedResponse = await request.send();
-        if (streamedResponse.statusCode >= 400) {
-          final respBody = await streamedResponse.stream.bytesToString();
-          throw UploadException('Photo upload failed (${streamedResponse.statusCode}): $respBody');
-        }
+      case UploadTaskType.completeRecording:
+        await _api.completeRecording(
+          task.recordingId,
+          totalDurationMs: task.metadata['totalDurationMs'] as int,
+        );
     }
   }
 
@@ -253,7 +223,7 @@ class UploadQueueService {
     ];
   }
 
-  /// Check if all chunks for a recording have been uploaded.
+  /// Check if all tasks for a recording have finished.
   bool isRecordingFullyUploaded(String recordingId) {
     final pending = _queue.where((t) => t.recordingId == recordingId);
     return pending.isEmpty;
@@ -276,14 +246,14 @@ class UploadQueueService {
   }
 }
 
-/// A single upload task in the queue.
+/// A single task in the sync queue.
 class UploadTask {
   static const int maxRetries = 5;
 
   final String id;
   final UploadTaskType type;
   final String recordingId;
-  final String filePath;
+  final String? filePath;
   final Map<String, dynamic> metadata;
   UploadTaskStatus status;
   int attempts;
@@ -293,14 +263,14 @@ class UploadTask {
     required this.id,
     required this.type,
     required this.recordingId,
-    required this.filePath,
+    this.filePath,
     required this.metadata,
     this.status = UploadTaskStatus.pending,
     this.attempts = 0,
   }) : createdAt = DateTime.now();
 }
 
-enum UploadTaskType { audioChunk, photo }
+enum UploadTaskType { createRecording, audioChunk, completeRecording }
 
 enum UploadTaskStatus { pending, uploading, completed, failed }
 

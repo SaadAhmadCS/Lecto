@@ -96,9 +96,13 @@ class LectoApiClient {
     return _decode(response);
   }
 
-  /// Create a new recording session on the backend.
-  /// Returns the server-side recording data (including ID).
+  /// Create a recording session on the backend.
+  ///
+  /// [id] is generated on-device so a recording started offline keeps the
+  /// same ID once it syncs. Idempotent: repeating it returns the existing row.
+  /// Pass `'unsorted'` as [subjectId] for Quick Record.
   Future<Map<String, dynamic>> createRecording({
+    required String id,
     required String subjectId,
     required String title,
   }) async {
@@ -106,10 +110,31 @@ class LectoApiClient {
       Uri.parse('$baseUrl/api/v1/recordings'),
       headers: _jsonHeaders,
       body: jsonEncode({
+        'id': id,
         'subjectId': subjectId,
         'title': title,
       }),
     );
+    return _decode(response);
+  }
+
+  /// Upload one audio chunk as multipart form data.
+  Future<Map<String, dynamic>> uploadChunk({
+    required String recordingId,
+    required String filePath,
+    required int sequenceNumber,
+    required int durationMs,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/api/v1/recordings/$recordingId/chunks'),
+    );
+    if (_authHeader != null) request.headers.addAll(_authHeader!);
+    request.fields['sequenceNumber'] = '$sequenceNumber';
+    request.fields['durationMs'] = '$durationMs';
+    request.files.add(await http.MultipartFile.fromPath('file', filePath));
+
+    final response = await http.Response.fromStream(await _client.send(request));
     return _decode(response);
   }
 

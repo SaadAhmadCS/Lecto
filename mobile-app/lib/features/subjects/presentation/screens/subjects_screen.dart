@@ -463,7 +463,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         backgroundColor: AppColors.darkSurface,
         title: const Text('Delete Subject?'),
         content: const Text(
-          'Recordings in this subject will not be deleted.',
+          'Its recordings will be moved to Unsorted.',
         ),
         actions: [
           TextButton(
