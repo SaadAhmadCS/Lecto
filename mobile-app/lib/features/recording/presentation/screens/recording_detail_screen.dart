@@ -8,9 +8,11 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/upload_queue_service.dart';
+import '../../../../core/services/processing_notifier.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
+import '../widgets/recording_audio_player.dart';
 import '../widgets/transcript_search.dart';
 
 /// Recording Detail Screen — view processing status, transcript & summary.
@@ -68,12 +70,16 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    ProcessingNotifier.viewingRecordingId = widget.recordingId;
     _fetchStatus();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    if (ProcessingNotifier.viewingRecordingId == widget.recordingId) {
+      ProcessingNotifier.viewingRecordingId = null;
+    }
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -600,6 +606,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
             : null,
       ),
       body: _buildBody(),
+      // Plays the audio kept on this device, on every tab and state
+      bottomNavigationBar: RecordingAudioPlayerBar(
+        recordingId: widget.recordingId,
+      ),
     );
   }
 

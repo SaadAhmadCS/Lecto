@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:go_router/go_router.dart';
 
 import 'core/di/service_locator.dart';
 import 'core/network/api_client.dart';
@@ -12,6 +13,7 @@ import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/foreground_recording_service.dart';
 import 'core/services/auth_service.dart';
+import 'core/services/notification_service.dart';
 import 'features/recording/data/local/recording_dao.dart';
 import 'features/recording/data/services/audio_recorder_service.dart';
 import 'features/recording/data/services/photo_capture_service.dart';
@@ -38,22 +40,31 @@ void main() async {
   await initServiceLocator();
   final isAuthenticated = sl<AuthService>().isSignedIn;
 
-  runApp(LectoApp(
-    hasCompletedOnboarding: hasCompletedOnboarding,
+  final router = AppRouter.router(
+    showOnboarding: !hasCompletedOnboarding,
     isAuthenticated: isAuthenticated,
-  ));
+  );
+
+  // Tapping a "notes ready" notification opens that recording
+  final notifications = sl<NotificationService>();
+  void openRecording(String id) => router.push('/recording/$id');
+  notifications.onRecordingTapped = openRecording;
+
+  runApp(LectoApp(router: router));
+
+  final launchRecordingId = await notifications.launchRecordingId();
+  if (launchRecordingId != null && isAuthenticated) {
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => openRecording(launchRecordingId),
+    );
+  }
 }
 
 /// Root application widget.
 class LectoApp extends StatelessWidget {
-  final bool hasCompletedOnboarding;
-  final bool isAuthenticated;
-  
-  const LectoApp({
-    super.key, 
-    required this.hasCompletedOnboarding,
-    required this.isAuthenticated,
-  });
+  final GoRouter router;
+
+  const LectoApp({super.key, required this.router});
 
   @override
   Widget build(BuildContext context) {
@@ -90,10 +101,7 @@ class LectoApp extends StatelessWidget {
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeMode.dark, // Default to dark
-        routerConfig: AppRouter.router(
-          showOnboarding: !hasCompletedOnboarding,
-          isAuthenticated: isAuthenticated,
-        ),
+        routerConfig: router,
       ),
     );
   }

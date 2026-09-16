@@ -29,6 +29,7 @@ class UploadQueueService {
   final List<UploadTask> _failed = [];
 
   final _statusController = StreamController<UploadQueueStatus>.broadcast();
+  final _taskCompletedController = StreamController<UploadTask>.broadcast();
   StreamSubscription<bool>? _connectivitySub;
   Timer? _retryTimer;
   bool _isProcessing = false;
@@ -46,6 +47,9 @@ class UploadQueueService {
 
   /// Stream of queue status updates.
   Stream<UploadQueueStatus> get statusStream => _statusController.stream;
+
+  /// Emits each task after it succeeds against the backend.
+  Stream<UploadTask> get taskCompleted => _taskCompletedController.stream;
 
   /// Current queue length.
   int get pendingCount => _queue.length;
@@ -168,6 +172,7 @@ class UploadQueueService {
         _queue.removeFirst();
         task.status = UploadTaskStatus.completed;
         _completed.add(task);
+        _taskCompletedController.add(task);
         _persist(() => _store.delete(task.id));
         _emitStatus();
         debugPrint('UploadQueue: ✅ ${task.id}');
@@ -287,6 +292,7 @@ class UploadQueueService {
     _connectivitySub?.cancel();
     _retryTimer?.cancel();
     _statusController.close();
+    _taskCompletedController.close();
   }
 }
 

@@ -2,6 +2,8 @@ import 'package:get_it/get_it.dart';
 
 import '../network/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/processing_notifier.dart';
 import '../network/connectivity_service.dart';
 import '../network/upload_queue_service.dart';
 import '../permissions/permission_service.dart';
@@ -44,6 +46,19 @@ Future<void> initServiceLocator() async {
   );
   await uploadQueue.initialize();
   sl.registerSingleton<UploadQueueService>(uploadQueue);
+
+  // === Notifications ===
+  final notifications = NotificationService();
+  await notifications.initialize();
+  sl.registerSingleton<NotificationService>(notifications);
+
+  sl.registerSingleton<ProcessingNotifier>(
+    ProcessingNotifier(
+      apiClient: sl<LectoApiClient>(),
+      uploadQueue: uploadQueue,
+      notifications: notifications,
+    )..start(),
+  );
 
   // === Recording Services ===
   sl.registerLazySingleton<StorageMonitorService>(
