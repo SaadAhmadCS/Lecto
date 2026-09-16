@@ -11,6 +11,7 @@ import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
+import '../widgets/transcript_search.dart';
 
 /// Recording Detail Screen — view processing status, transcript & summary.
 ///
@@ -36,7 +37,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   static const _waitingForUpload = 'waiting_upload';
 
   late final LectoApiClient _api = context.read<LectoApiClient>();
-  late final UploadQueueService _uploadQueue = context.read<UploadQueueService>();
+  late final UploadQueueService _uploadQueue = context
+      .read<UploadQueueService>();
   Timer? _pollTimer;
 
   // State
@@ -54,6 +56,14 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   DateTime? _recordedAt;
   Duration? _duration;
 
+  // In-transcript search (ORG-013)
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  TranscriptSearchIndex? _searchIndex;
+  List<TranscriptMatch> _matches = const [];
+  int _currentMatch = 0;
+  List<GlobalKey> _paragraphKeys = const [];
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +75,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   void dispose() {
     _pollTimer?.cancel();
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -156,6 +167,111 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
         _isLoading = false;
       });
     }
+  }
+
+  void _openSearch() {
+    final transcript = _transcriptContent;
+    if (transcript == null) return;
+
+    final index = _searchIndex ??= TranscriptSearchIndex(transcript);
+    setState(() {
+      _isSearching = true;
+      _paragraphKeys = List.generate(
+        index.paragraphs.length,
+        (_) => GlobalKey(),
+      );
+    });
+    _tabController.animateTo(1); // Transcript tab
+  }
+
+  void _closeSearch() {
+    _searchController.clear();
+    setState(() {
+      _isSearching = false;
+      _matches = const [];
+      _currentMatch = 0;
+    });
+  }
+
+  void _onSearchChanged(String query) {
+    setState(() {
+      _matches = _searchIndex?.findMatches(query) ?? const [];
+      _currentMatch = 0;
+    });
+    _scrollToCurrentMatch();
+  }
+
+  /// Move to the next (+1) or previous (-1) match, wrapping around.
+  void _jumpToMatch(int delta) {
+    if (_matches.isEmpty) return;
+    setState(() {
+      _currentMatch = (_currentMatch + delta) % _matches.length;
+    });
+    _scrollToCurrentMatch();
+  }
+
+  void _scrollToCurrentMatch() {
+    if (_matches.isEmpty) return;
+    final key = _paragraphKeys[_matches[_currentMatch].paragraph];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.3,
+        duration: const Duration(milliseconds: 250),
+      );
+    });
+  }
+
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _searchController,
+      autofocus: true,
+      textInputAction: TextInputAction.search,
+      onChanged: _onSearchChanged,
+      onSubmitted: (_) => _jumpToMatch(1),
+      style: Theme.of(context).textTheme.bodyLarge,
+      decoration: const InputDecoration(
+        hintText: 'Search transcript',
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        filled: false,
+      ),
+    );
+  }
+
+  List<Widget> _buildSearchActions() {
+    final hasQuery = _searchController.text.trim().isNotEmpty;
+    return [
+      if (hasQuery)
+        Center(
+          child: Text(
+            _matches.isEmpty
+                ? 'No matches'
+                : '${_currentMatch + 1} of ${_matches.length}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark),
+          ),
+        ),
+      IconButton(
+        icon: const Icon(Icons.keyboard_arrow_up_rounded),
+        tooltip: 'Previous match',
+        onPressed: _matches.isEmpty ? null : () => _jumpToMatch(-1),
+      ),
+      IconButton(
+        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+        tooltip: 'Next match',
+        onPressed: _matches.isEmpty ? null : () => _jumpToMatch(1),
+      ),
+      IconButton(
+        icon: const Icon(Icons.close_rounded),
+        tooltip: 'Close search',
+        onPressed: _closeSearch,
+      ),
+    ];
   }
 
   /// The backend doesn't know a recording until its upload starts syncing.
@@ -267,7 +383,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
             if (snapshot.hasError) {
               return const Padding(
                 padding: EdgeInsets.all(AppSpacing.xxl),
-                child: Text('Could not load subjects', textAlign: TextAlign.center),
+                child: Text(
+                  'Could not load subjects',
+                  textAlign: TextAlign.center,
+                ),
               );
             }
 
@@ -279,13 +398,16 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.xl, 0, AppSpacing.xl, AppSpacing.sm,
+                    AppSpacing.xl,
+                    0,
+                    AppSpacing.xl,
+                    AppSpacing.sm,
                   ),
                   child: Text(
                     'Move to…',
                     style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 for (final subject in subjects)
@@ -296,7 +418,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
                     ),
                     title: Text(subject['name'] as String? ?? 'Untitled'),
                     trailing: subject['id'] == currentSubjectId
-                        ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                        ? const Icon(
+                            Icons.check_rounded,
+                            color: AppColors.primary,
+                          )
                         : null,
                     enabled: subject['id'] != currentSubjectId,
                     onTap: () => Navigator.of(ctx).pop(subject),
@@ -330,7 +455,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.darkSurface,
         title: const Text('Delete Recording'),
-        content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
+        content: const Text(
+          'Delete this recording? This will permanently remove the transcript and notes.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -369,77 +496,93 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     return Scaffold(
       backgroundColor: AppColors.darkBg,
       appBar: AppBar(
-        title: GestureDetector(
-          onTap: _canEditOnServer ? _renameRecording : null,
-          child: Text(
-            _title,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ),
-        actions: [
-          if (_processingStatus == 'completed' && _summaryContent != null)
-            IconButton(
-              icon: const Icon(Icons.picture_as_pdf_rounded),
-              tooltip: 'Export PDF',
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (context) => ExportOptionsSheet(
-                    title: _title,
-                    subjectName: _subject?['name'] as String?,
-                    recordingDate: _recordedAt,
-                    duration: _duration,
-                    summaryContent: _summaryContent!,
-                    transcriptContent: _transcriptContent,
-                  ),
-                );
-              },
-            ),
-          PopupMenuButton<_DetailAction>(
-            tooltip: 'More',
-            onSelected: _onMenuAction,
-            itemBuilder: (context) => [
-              if (_canEditOnServer) ...[
-                const PopupMenuItem(
-                  value: _DetailAction.rename,
-                  child: ListTile(
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Rename'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: _DetailAction.move,
-                  child: ListTile(
-                    leading: Icon(Icons.drive_file_move_outline),
-                    title: Text('Move to…'),
-                  ),
-                ),
-              ],
-              if (_processingStatus == 'completed' &&
-                  (_summaryContent != null || _transcriptContent != null))
-                const PopupMenuItem(
-                  value: _DetailAction.copy,
-                  child: ListTile(
-                    leading: Icon(Icons.copy_rounded),
-                    title: Text('Copy notes'),
-                  ),
-                ),
-              const PopupMenuItem(
-                value: _DetailAction.delete,
-                child: ListTile(
-                  leading: Icon(Icons.delete_outline_rounded, color: AppColors.error),
-                  title: Text('Delete', style: TextStyle(color: AppColors.error)),
+        title: _isSearching
+            ? _buildSearchField()
+            : GestureDetector(
+                onTap: _canEditOnServer ? _renameRecording : null,
+                child: Text(
+                  _title,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
-            ],
-          ),
-        ],
+        actions: _isSearching
+            ? _buildSearchActions()
+            : [
+                if (_processingStatus == 'completed' &&
+                    _transcriptContent != null)
+                  IconButton(
+                    icon: const Icon(Icons.search_rounded),
+                    tooltip: 'Search transcript',
+                    onPressed: _openSearch,
+                  ),
+                if (_processingStatus == 'completed' && _summaryContent != null)
+                  IconButton(
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    tooltip: 'Export PDF',
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => ExportOptionsSheet(
+                          title: _title,
+                          subjectName: _subject?['name'] as String?,
+                          recordingDate: _recordedAt,
+                          duration: _duration,
+                          summaryContent: _summaryContent!,
+                          transcriptContent: _transcriptContent,
+                        ),
+                      );
+                    },
+                  ),
+                PopupMenuButton<_DetailAction>(
+                  tooltip: 'More',
+                  onSelected: _onMenuAction,
+                  itemBuilder: (context) => [
+                    if (_canEditOnServer) ...[
+                      const PopupMenuItem(
+                        value: _DetailAction.rename,
+                        child: ListTile(
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('Rename'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: _DetailAction.move,
+                        child: ListTile(
+                          leading: Icon(Icons.drive_file_move_outline),
+                          title: Text('Move to…'),
+                        ),
+                      ),
+                    ],
+                    if (_processingStatus == 'completed' &&
+                        (_summaryContent != null || _transcriptContent != null))
+                      const PopupMenuItem(
+                        value: _DetailAction.copy,
+                        child: ListTile(
+                          leading: Icon(Icons.copy_rounded),
+                          title: Text('Copy notes'),
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: _DetailAction.delete,
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.delete_outline_rounded,
+                          color: AppColors.error,
+                        ),
+                        title: Text(
+                          'Delete',
+                          style: TextStyle(color: AppColors.error),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
         bottom: _processingStatus == 'completed'
             ? TabBar(
                 controller: _tabController,
@@ -448,7 +591,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
                 unselectedLabelColor: AppColors.textSecondaryDark,
                 tabs: const [
                   Tab(icon: Icon(Icons.notes_rounded), text: 'Notes'),
-                  Tab(icon: Icon(Icons.description_outlined), text: 'Transcript'),
+                  Tab(
+                    icon: Icon(Icons.description_outlined),
+                    text: 'Transcript',
+                  ),
                 ],
               )
             : null,
@@ -471,10 +617,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     if (_processingStatus == 'completed') {
       return TabBarView(
         controller: _tabController,
-        children: [
-          _buildSummaryView(),
-          _buildTranscriptView(),
-        ],
+        children: [_buildSummaryView(), _buildTranscriptView()],
       );
     }
 
@@ -529,17 +672,17 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 
             Text(
               stage,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
               _getStageDescription(_processingStatus),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondaryDark,
-                  ),
+                color: AppColors.textSecondaryDark,
+              ),
             ),
 
             const SizedBox(height: AppSpacing.xl),
@@ -559,8 +702,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
               Text(
                 'Chunk $_transcribedChunks of $_totalChunks · $_percentage%',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textTertiaryDark,
-                    ),
+                  color: AppColors.textTertiaryDark,
+                ),
               ),
             ],
           ],
@@ -598,25 +741,35 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
           color: AppColors.darkSurface,
           child: Row(
             children: [
-              Icon(Icons.text_snippet_outlined,
-                  size: 16, color: AppColors.textTertiaryDark),
+              Icon(
+                Icons.text_snippet_outlined,
+                size: 16,
+                color: AppColors.textTertiaryDark,
+              ),
               const SizedBox(width: AppSpacing.xs),
               Text(
                 '$_wordCount words',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textTertiaryDark,
-                    ),
+                  color: AppColors.textTertiaryDark,
+                ),
               ),
             ],
           ),
         ),
         Expanded(
-          child: Markdown(
-            data: _transcriptContent!,
-            padding: const EdgeInsets.all(AppSpacing.base),
-            styleSheet: _markdownStyleSheet(context),
-            selectable: true,
-          ),
+          child: _isSearching && _searchController.text.trim().isNotEmpty
+              ? SearchableTranscriptView(
+                  index: _searchIndex!,
+                  matches: _matches,
+                  currentMatch: _currentMatch,
+                  paragraphKeys: _paragraphKeys,
+                )
+              : Markdown(
+                  data: _transcriptContent!,
+                  padding: const EdgeInsets.all(AppSpacing.base),
+                  styleSheet: _markdownStyleSheet(context),
+                  selectable: true,
+                ),
         ),
       ],
     );
@@ -645,17 +798,17 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
             const SizedBox(height: AppSpacing.base),
             Text(
               'Processing Failed',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
               _getFailureMessage(_processingStatus),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondaryDark,
-                  ),
+                color: AppColors.textSecondaryDark,
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             ElevatedButton.icon(
@@ -676,8 +829,11 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.wifi_off_rounded,
-                size: 48, color: AppColors.textTertiaryDark),
+            Icon(
+              Icons.wifi_off_rounded,
+              size: 48,
+              color: AppColors.textTertiaryDark,
+            ),
             const SizedBox(height: AppSpacing.base),
             Text(
               'Connection Error',
@@ -688,8 +844,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
               'Could not reach the server.\nMake sure the backend is running.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondaryDark,
-                  ),
+                color: AppColors.textSecondaryDark,
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             OutlinedButton.icon(
@@ -714,42 +870,43 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   MarkdownStyleSheet _markdownStyleSheet(BuildContext context) {
     return MarkdownStyleSheet(
       h1: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimaryDark,
-          ),
+        fontWeight: FontWeight.w700,
+        color: AppColors.textPrimaryDark,
+      ),
       h2: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: AppColors.primary,
-          ),
+        fontWeight: FontWeight.w600,
+        color: AppColors.primary,
+      ),
       h3: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimaryDark,
-          ),
+        fontWeight: FontWeight.w600,
+        color: AppColors.textPrimaryDark,
+      ),
       p: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: AppColors.textPrimaryDark,
-            height: 1.6,
-          ),
-      listBullet: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: AppColors.textSecondaryDark,
-          ),
+        color: AppColors.textPrimaryDark,
+        height: 1.6,
+      ),
+      listBullet: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondaryDark),
       code: Theme.of(context).textTheme.bodySmall?.copyWith(
-            fontFamily: 'monospace',
-            backgroundColor: AppColors.darkSurfaceLight,
-            color: AppColors.accent,
-          ),
+        fontFamily: 'monospace',
+        backgroundColor: AppColors.darkSurfaceLight,
+        color: AppColors.accent,
+      ),
       blockquote: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: AppColors.textSecondaryDark,
-            fontStyle: FontStyle.italic,
-          ),
+        color: AppColors.textSecondaryDark,
+        fontStyle: FontStyle.italic,
+      ),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: AppColors.primary.withValues(alpha: 0.5), width: 3),
+          left: BorderSide(
+            color: AppColors.primary.withValues(alpha: 0.5),
+            width: 3,
+          ),
         ),
       ),
       horizontalRuleDecoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: AppColors.darkBorder, width: 1),
-        ),
+        border: Border(top: BorderSide(color: AppColors.darkBorder, width: 1)),
       ),
     );
   }
