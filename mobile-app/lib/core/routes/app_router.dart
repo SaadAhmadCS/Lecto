@@ -8,6 +8,7 @@ import '../../features/onboarding/presentation/screens/onboarding_screen.dart';
 import '../../features/recording/presentation/screens/recording_detail_screen.dart';
 import '../../features/recording/presentation/screens/recording_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
+import '../../features/subjects/presentation/screens/subject_detail_screen.dart';
 import '../../features/subjects/presentation/screens/subjects_screen.dart';
 import '../../features/transcript/presentation/screens/transcripts_screen.dart';
 import '../../shared/widgets/app_scaffold.dart';
@@ -20,6 +21,7 @@ class AppRoutes {
   static const String splash = '/splash';
   static const String home = '/home';
   static const String subjects = '/subjects';
+  static const String subjectDetail = '/subjects/:id';
   static const String record = '/record';
   static const String transcripts = '/transcripts';
   static const String settings = '/settings';
@@ -99,9 +101,16 @@ class AppRouter {
         builder: (context, state) => const FirstSubjectScreen(),
       ),
       GoRoute(
+        path: AppRoutes.subjectDetail,
+        builder: (context, state) => SubjectDetailScreen(
+          subjectId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.record,
-        builder: (context, state) =>
-            const RecordingScreen(),
+        builder: (context, state) => RecordingScreen(
+          initialSubjectId: state.uri.queryParameters['subjectId'],
+        ),
       ),
       GoRoute(
         path: AppRoutes.recordingDetail,

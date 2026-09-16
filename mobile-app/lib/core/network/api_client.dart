@@ -197,6 +197,15 @@ class LectoApiClient {
     return _decode(response);
   }
 
+  /// Get a single subject (includes recording count).
+  Future<Map<String, dynamic>> getSubject(String id) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/v1/subjects/$id'),
+      headers: await _headers(),
+    );
+    return _decode(response);
+  }
+
   /// Delete a subject.
   Future<void> deleteSubject(String id) async {
     final response = await _client.delete(
@@ -220,6 +229,24 @@ class LectoApiClient {
       Uri.parse('$baseUrl/api/v1/subjects/$id'),
       headers: await _headers(json: true),
       body: jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
+  /// Rename a recording and/or move it to another subject.
+  /// Pass `'unsorted'` as [subjectId] to move it to Unsorted.
+  Future<Map<String, dynamic>> updateRecording(
+    String id, {
+    String? title,
+    String? subjectId,
+  }) async {
+    final response = await _client.patch(
+      Uri.parse('$baseUrl/api/v1/recordings/$id'),
+      headers: await _headers(json: true),
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (subjectId != null) 'subjectId': subjectId,
+      }),
     );
     return _decode(response);
   }

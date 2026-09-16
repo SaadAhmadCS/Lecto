@@ -17,6 +17,8 @@ export type CreateRecordingInput = z.infer<typeof createRecordingSchema>;
 export const updateRecordingSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   status: z.enum(['completed', 'processing', 'transcribed']).optional(),
+  // Move to another subject ('unsorted' = the Unsorted subject)
+  subjectId: z.union([z.string().uuid(), z.literal(UNSORTED_SUBJECT_ID)]).optional(),
 });
 
 export type UpdateRecordingInput = z.infer<typeof updateRecordingSchema>;

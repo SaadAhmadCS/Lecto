@@ -26,7 +26,11 @@ import '../widgets/waveform_visualizer.dart';
 /// - Camera capture for board photos
 /// - Storage & connectivity status
 class RecordingScreen extends StatelessWidget {
-  const RecordingScreen({super.key});
+  /// When set (e.g. opened from a subject), recording starts in this
+  /// subject without showing the subject picker.
+  final String? initialSubjectId;
+
+  const RecordingScreen({super.key, this.initialSubjectId});
 
   @override
   Widget build(BuildContext context) {
@@ -39,13 +43,15 @@ class RecordingScreen extends StatelessWidget {
         recordingDao: context.read(),
         uploadQueue: context.read(),
       ),
-      child: const _RecordingScreenBody(),
+      child: _RecordingScreenBody(initialSubjectId: initialSubjectId),
     );
   }
 }
 
 class _RecordingScreenBody extends StatelessWidget {
-  const _RecordingScreenBody();
+  final String? initialSubjectId;
+
+  const _RecordingScreenBody({this.initialSubjectId});
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +160,7 @@ class _RecordingScreenBody extends StatelessWidget {
           RecordingControls(
             isRecording: false,
             isPaused: false,
-            onRecordPause: () => _showSubjectPicker(context),
+            onRecordPause: () => _beginRecording(context),
             onStop: () {},
             onCapturePhoto: () {},
           ),
@@ -430,7 +436,7 @@ class _RecordingScreenBody extends StatelessWidget {
             const SizedBox(height: AppSpacing.xl),
             if (state.canRetry)
               FilledButton(
-                onPressed: () => _showSubjectPicker(context),
+                onPressed: () => _beginRecording(context),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                 ),
@@ -445,6 +451,16 @@ class _RecordingScreenBody extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Start in the preselected subject, or ask which subject to use.
+  void _beginRecording(BuildContext context) {
+    final subjectId = initialSubjectId;
+    if (subjectId != null) {
+      _startRecordingWithSubject(context, subjectId);
+    } else {
+      _showSubjectPicker(context);
+    }
   }
 
   /// Show subject picker bottom sheet before recording starts.

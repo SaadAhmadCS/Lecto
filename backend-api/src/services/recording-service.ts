@@ -92,19 +92,7 @@ export class RecordingService {
         minute: '2-digit',
       })}`;
 
-    let subjectId = data.subjectId;
-    if (subjectId === UNSORTED_SUBJECT_ID) {
-      subjectId = (await subjectService.getOrCreateUnsorted(userId)).id;
-    } else {
-      // Verify subject exists and belongs to user
-      const subject = await prisma.subject.findFirst({
-        where: { id: subjectId, userId },
-      });
-
-      if (!subject) {
-        throw new NotFoundError('Subject', subjectId);
-      }
-    }
+    const subjectId = await this.resolveSubjectId(userId, data.subjectId);
 
     return prisma.recording.create({
       data: {
@@ -126,7 +114,15 @@ export class RecordingService {
 
     const updated = await prisma.recording.update({
       where: { id },
-      data,
+      data: {
+        ...data,
+        subjectId: data.subjectId
+          ? await this.resolveSubjectId(userId, data.subjectId)
+          : undefined,
+      },
+      include: {
+        subject: { select: { id: true, name: true, color: true } },
+      },
     });
 
     // Auto-trigger processing when recording is completed. Only on the
@@ -137,6 +133,21 @@ export class RecordingService {
     }
 
     return updated;
+  }
+
+  /** Resolve 'unsorted' and verify the subject belongs to the user. */
+  private async resolveSubjectId(userId: string, subjectId: string): Promise<string> {
+    if (subjectId === UNSORTED_SUBJECT_ID) {
+      return (await subjectService.getOrCreateUnsorted(userId)).id;
+    }
+
+    const subject = await prisma.subject.findFirst({
+      where: { id: subjectId, userId },
+    });
+    if (!subject) {
+      throw new NotFoundError('Subject', subjectId);
+    }
+    return subject.id;
   }
 
   async delete(id: string, userId: string) {

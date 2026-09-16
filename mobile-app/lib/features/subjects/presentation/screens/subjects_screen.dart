@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -444,8 +445,49 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         itemCount: _subjects.length,
         itemBuilder: (context, index) => _SubjectCard(
           subject: _subjects[index],
-          onTap: () => _showEditDialog(_subjects[index]),
-          onDelete: () => _deleteSubject(_subjects[index]['id'] as String),
+          onTap: () => _openSubject(_subjects[index]),
+          onMore: () => _showSubjectMenu(_subjects[index]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSubject(Map<String, dynamic> subject) async {
+    await context.push('/subjects/${subject['id']}');
+    // Recording counts may have changed
+    if (mounted) _loadSubjects();
+  }
+
+  void _showSubjectMenu(Map<String, dynamic> subject) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit subject'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showEditDialog(subject);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded,
+                  color: AppColors.error),
+              title: const Text('Delete subject',
+                  style: TextStyle(color: AppColors.error)),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _deleteSubject(subject['id'] as String);
+              },
+            ),
+          ],
         ),
       ),
     );
@@ -497,12 +539,12 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 class _SubjectCard extends StatelessWidget {
   final Map<String, dynamic> subject;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final VoidCallback onMore;
 
   const _SubjectCard({
     required this.subject,
     required this.onTap,
-    required this.onDelete,
+    required this.onMore,
   });
 
   @override
@@ -524,7 +566,7 @@ class _SubjectCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       child: InkWell(
         onTap: onTap,
-        onLongPress: onDelete,
+        onLongPress: onMore,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: Container(
           padding: AppSpacing.cardPadding,
@@ -552,9 +594,11 @@ class _SubjectCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  GestureDetector(
-                    onTap: onDelete,
-                    child: Icon(
+                  IconButton(
+                    onPressed: onMore,
+                    tooltip: 'Subject options',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
                       Icons.more_vert_rounded,
                       size: 18,
                       color: AppColors.textTertiaryDark,

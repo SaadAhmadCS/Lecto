@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -48,6 +49,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   int _wordCount = 0;
   bool _isLoading = true;
   String? _error;
+  late String _title = widget.title;
+  Map<String, dynamic>? _subject;
+  DateTime? _recordedAt;
+  Duration? _duration;
 
   @override
   void initState() {
@@ -81,6 +86,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       final response = await _api.getProcessingStatus(widget.recordingId);
       final data = response['data'] as Map<String, dynamic>;
       final progress = data['progress'] as Map<String, dynamic>;
+
+      if (_subject == null) _loadRecordingInfo();
 
       if (!mounted) return;
       setState(() {
@@ -151,17 +158,227 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     }
   }
 
+  /// The backend doesn't know a recording until its upload starts syncing.
+  bool get _canEditOnServer => _processingStatus != _waitingForUpload;
+
+  /// Title, subject, date and duration for the app bar and PDF header.
+  Future<void> _loadRecordingInfo() async {
+    try {
+      final response = await _api.getRecording(widget.recordingId);
+      final data = response['data'] as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _title = data['title'] as String? ?? _title;
+        _subject = data['subject'] as Map<String, dynamic>?;
+        _recordedAt = DateTime.tryParse(data['createdAt'] as String? ?? '');
+        final durationMs = data['totalDurationMs'] as int? ?? 0;
+        _duration = durationMs > 0 ? Duration(milliseconds: durationMs) : null;
+      });
+    } catch (e) {
+      debugPrint('Failed to load recording info: $e');
+    }
+  }
+
+  void _onMenuAction(_DetailAction action) {
+    switch (action) {
+      case _DetailAction.rename:
+        _renameRecording();
+      case _DetailAction.move:
+        _moveRecording();
+      case _DetailAction.copy:
+        Clipboard.setData(
+          ClipboardData(text: _summaryContent ?? _transcriptContent ?? ''),
+        );
+        _showSnack('Notes copied to clipboard');
+      case _DetailAction.delete:
+        _deleteRecording();
+    }
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _renameRecording() async {
+    final controller = TextEditingController(text: _title);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Rename recording'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: AppConstants.maxRecordingTitleLength,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Recording title'),
+          onSubmitted: (value) => Navigator.of(ctx).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (newTitle == null || newTitle.isEmpty || newTitle == _title) return;
+
+    try {
+      await _api.updateRecording(widget.recordingId, title: newTitle);
+      if (!mounted) return;
+      setState(() => _title = newTitle);
+      _showSnack('Recording renamed');
+    } catch (e) {
+      _showSnack('Failed to rename: $e');
+    }
+  }
+
+  Future<void> _moveRecording() async {
+    final currentSubjectId = _subject?['id'] as String?;
+
+    final target = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: AppColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: FutureBuilder<Map<String, dynamic>>(
+          future: _api.listSubjects(),
+          builder: (ctx, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Padding(
+                padding: EdgeInsets.all(AppSpacing.xxl),
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                ),
+              );
+            }
+            if (snapshot.hasError) {
+              return const Padding(
+                padding: EdgeInsets.all(AppSpacing.xxl),
+                child: Text('Could not load subjects', textAlign: TextAlign.center),
+              );
+            }
+
+            final subjects = (snapshot.data!['data'] as List<dynamic>)
+                .cast<Map<String, dynamic>>();
+            return ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xl, 0, AppSpacing.xl, AppSpacing.sm,
+                  ),
+                  child: Text(
+                    'Move to…',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+                for (final subject in subjects)
+                  ListTile(
+                    leading: Icon(
+                      Icons.folder_rounded,
+                      color: _parseColor(subject['color'] as String?),
+                    ),
+                    title: Text(subject['name'] as String? ?? 'Untitled'),
+                    trailing: subject['id'] == currentSubjectId
+                        ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                        : null,
+                    enabled: subject['id'] != currentSubjectId,
+                    onTap: () => Navigator.of(ctx).pop(subject),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    if (target == null) return;
+
+    try {
+      final response = await _api.updateRecording(
+        widget.recordingId,
+        subjectId: target['id'] as String,
+      );
+      final data = response['data'] as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() => _subject = data['subject'] as Map<String, dynamic>?);
+      _showSnack('Moved to ${target['name']}');
+    } catch (e) {
+      _showSnack('Failed to move: $e');
+    }
+  }
+
+  Future<void> _deleteRecording() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Delete Recording'),
+        content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await _api.deleteRecording(widget.recordingId);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      _showSnack('Recording deleted');
+    } catch (e) {
+      _showSnack('Failed to delete: $e');
+    }
+  }
+
+  static Color _parseColor(String? hex) {
+    try {
+      return Color(int.parse((hex ?? '#6366F1').replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return AppColors.primary;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.darkBg,
       appBar: AppBar(
-        title: Text(
-          widget.title,
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w600),
+        title: GestureDetector(
+          onTap: _canEditOnServer ? _renameRecording : null,
+          child: Text(
+            _title,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
         ),
         actions: [
           if (_processingStatus == 'completed' && _summaryContent != null)
@@ -174,70 +391,53 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
                   builder: (context) => ExportOptionsSheet(
-                    title: widget.title,
+                    title: _title,
+                    subjectName: _subject?['name'] as String?,
+                    recordingDate: _recordedAt,
+                    duration: _duration,
                     summaryContent: _summaryContent!,
                     transcriptContent: _transcriptContent,
                   ),
                 );
               },
             ),
-          if (_processingStatus == 'completed' && (_summaryContent != null || _transcriptContent != null))
-            IconButton(
-              icon: const Icon(Icons.copy_rounded),
-              tooltip: 'Copy notes',
-              onPressed: () {
-                final content = _summaryContent ?? _transcriptContent ?? '';
-                Clipboard.setData(ClipboardData(text: content));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Notes copied to clipboard'),
-                    duration: Duration(seconds: 2),
+          PopupMenuButton<_DetailAction>(
+            tooltip: 'More',
+            onSelected: _onMenuAction,
+            itemBuilder: (context) => [
+              if (_canEditOnServer) ...[
+                const PopupMenuItem(
+                  value: _DetailAction.rename,
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Rename'),
                   ),
-                );
-              },
-            ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded),
-            tooltip: 'Delete recording',
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: AppColors.darkSurface,
-                  title: const Text('Delete Recording'),
-                  content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      style: TextButton.styleFrom(foregroundColor: AppColors.error),
-                      onPressed: () => Navigator.of(context).pop(true),
-                      child: const Text('Delete'),
-                    ),
-                  ],
                 ),
-              );
-
-              if (confirm == true) {
-                try {
-                  await _api.deleteRecording(widget.recordingId);
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Recording deleted')),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to delete: $e')),
-                    );
-                  }
-                }
-              }
-            },
+                const PopupMenuItem(
+                  value: _DetailAction.move,
+                  child: ListTile(
+                    leading: Icon(Icons.drive_file_move_outline),
+                    title: Text('Move to…'),
+                  ),
+                ),
+              ],
+              if (_processingStatus == 'completed' &&
+                  (_summaryContent != null || _transcriptContent != null))
+                const PopupMenuItem(
+                  value: _DetailAction.copy,
+                  child: ListTile(
+                    leading: Icon(Icons.copy_rounded),
+                    title: Text('Copy notes'),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: _DetailAction.delete,
+                child: ListTile(
+                  leading: Icon(Icons.delete_outline_rounded, color: AppColors.error),
+                  title: Text('Delete', style: TextStyle(color: AppColors.error)),
+                ),
+              ),
+            ],
           ),
         ],
         bottom: _processingStatus == 'completed'
@@ -628,3 +828,5 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     }
   }
 }
+
+enum _DetailAction { rename, move, copy, delete }
