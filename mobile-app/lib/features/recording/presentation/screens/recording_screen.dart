@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import '../../../../core/network/api_client.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -35,6 +38,7 @@ class RecordingScreen extends StatelessWidget {
         permissionService: context.read(),
         recordingDao: context.read(),
         uploadQueue: context.read(),
+        apiClient: context.read(),
       ),
       child: const _RecordingScreenBody(),
     );
@@ -89,7 +93,7 @@ class _RecordingScreenBody extends StatelessWidget {
                         label: 'Settings',
                         textColor: Colors.white,
                         onPressed: () {
-                          // Open app settings for permissions
+                          openAppSettings();
                         },
                       )
                     : null,
@@ -151,11 +155,7 @@ class _RecordingScreenBody extends StatelessWidget {
           RecordingControls(
             isRecording: false,
             isPaused: false,
-            onRecordPause: () {
-              context.read<RecordingBloc>().add(
-                    const StartRecordingEvent(subjectId: 'default'),
-                  );
-            },
+            onRecordPause: () => _showSubjectPicker(context),
             onStop: () {},
             onCapturePhoto: () {},
           ),
@@ -321,7 +321,7 @@ class _RecordingScreenBody extends StatelessWidget {
                     .add(const ResumeRecordingEvent());
               },
               onStop: () => _showStopConfirmation(context),
-              onCapturePhoto: () {},
+              onCapturePhoto: () => _capturePhoto(context),
             ),
           ),
 
@@ -431,20 +431,185 @@ class _RecordingScreenBody extends StatelessWidget {
             const SizedBox(height: AppSpacing.xl),
             if (state.canRetry)
               FilledButton(
-                onPressed: () {
-                  context.read<RecordingBloc>().add(
-                        const StartRecordingEvent(subjectId: 'default'),
-                      );
-                },
+                onPressed: () => _showSubjectPicker(context),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                 ),
                 child: const Text('Try Again'),
+              )
+            else
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Back to Home'),
               ),
           ],
         ),
       ),
     );
+  }
+
+  /// Show subject picker bottom sheet before recording starts.
+  void _showSubjectPicker(BuildContext outerContext) {
+    final api = outerContext.read<LectoApiClient>();
+
+    showModalBottomSheet(
+      context: outerContext,
+      backgroundColor: AppColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return FutureBuilder<Map<String, dynamic>>(
+          future: api.listSubjects(),
+          builder: (ctx, snapshot) {
+            return Padding(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.darkBorder,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  Text(
+                    'Record for which subject?',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.base),
+
+                  // Quick Record option
+                  ListTile(
+                    leading: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.bolt_rounded,
+                          color: AppColors.primary, size: 20),
+                    ),
+                    title: const Text('Quick Record'),
+                    subtitle: Text(
+                      'Save to "Unsorted" — organize later',
+                      style: TextStyle(
+                        color: AppColors.textTertiaryDark,
+                        fontSize: 12,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _startRecordingWithSubject(outerContext, 'unsorted');
+                    },
+                  ),
+
+                  const Divider(color: AppColors.darkBorder),
+
+                  // Subject list
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.primary),
+                      ),
+                    )
+                  else if (snapshot.hasError)
+                    Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xl),
+                      child: Center(
+                        child: Text(
+                          'Could not load subjects.\nTap "Quick Record" above.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textSecondaryDark),
+                        ),
+                      ),
+                    )
+                  else ...[
+                    ..._buildSubjectList(ctx, outerContext, snapshot.data!),
+                  ],
+
+                  const SizedBox(height: AppSpacing.base),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildSubjectList(
+    BuildContext sheetContext,
+    BuildContext outerContext,
+    Map<String, dynamic> response,
+  ) {
+    final subjects =
+        (response['data'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+            [];
+
+    if (subjects.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+          child: Center(
+            child: Text(
+              'No subjects yet — use Quick Record or create one in Subjects tab.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textSecondaryDark, fontSize: 13),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return subjects.map((s) {
+      final name = s['name'] as String? ?? 'Untitled';
+      final id = s['id'] as String;
+      final colorStr = s['color'] as String? ?? '#6366F1';
+
+      Color cardColor;
+      try {
+        cardColor = Color(int.parse(colorStr.replaceFirst('#', '0xFF')));
+      } catch (_) {
+        cardColor = AppColors.primary;
+      }
+
+      return ListTile(
+        leading: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: cardColor.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(Icons.folder_rounded, color: cardColor, size: 20),
+        ),
+        title: Text(name),
+        onTap: () {
+          Navigator.of(sheetContext).pop();
+          _startRecordingWithSubject(outerContext, id);
+        },
+      );
+    }).toList();
+  }
+
+  void _startRecordingWithSubject(BuildContext context, String subjectId) {
+    context.read<RecordingBloc>().add(
+          StartRecordingEvent(subjectId: subjectId),
+        );
   }
 
   /// Capture a photo using the camera.

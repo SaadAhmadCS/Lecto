@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../shared/widgets/export_options_sheet.dart';
 
 /// Recording Detail Screen — view processing status, transcript & summary.
 ///
@@ -142,6 +144,83 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
               .titleLarge
               ?.copyWith(fontWeight: FontWeight.w600),
         ),
+        actions: [
+          if (_processingStatus == 'completed' && _summaryContent != null)
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_rounded),
+              tooltip: 'Export PDF',
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (context) => ExportOptionsSheet(
+                    title: widget.title,
+                    summaryContent: _summaryContent!,
+                    transcriptContent: _transcriptContent,
+                  ),
+                );
+              },
+            ),
+          if (_processingStatus == 'completed' && (_summaryContent != null || _transcriptContent != null))
+            IconButton(
+              icon: const Icon(Icons.copy_rounded),
+              tooltip: 'Copy notes',
+              onPressed: () {
+                final content = _summaryContent ?? _transcriptContent ?? '';
+                Clipboard.setData(ClipboardData(text: content));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Notes copied to clipboard'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded),
+            tooltip: 'Delete recording',
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: AppColors.darkSurface,
+                  title: const Text('Delete Recording'),
+                  content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true) {
+                try {
+                  await _api.deleteRecording(widget.recordingId);
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Recording deleted')),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to delete: $e')),
+                    );
+                  }
+                }
+              }
+            },
+          ),
+        ],
         bottom: _processingStatus == 'completed'
             ? TabBar(
                 controller: _tabController,

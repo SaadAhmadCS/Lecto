@@ -44,8 +44,7 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
 
     try {
       final response = await _api.listRecordings(limit: 50);
-      final data = response['data'] as Map<String, dynamic>;
-      final recordings = (data['recordings'] as List<dynamic>)
+      final recordings = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
 
       setState(() {
@@ -98,11 +97,67 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
         padding: const EdgeInsets.all(AppSpacing.base),
         itemCount: _recordings.length,
         separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-        itemBuilder: (context, index) =>
-            _RecordingCard(
-              recording: _recordings[index],
-              onTap: () => _navigateToDetail(_recordings[index]),
+        itemBuilder: (context, index) {
+          final recording = _recordings[index];
+          final id = recording['id'] as String;
+          return Dismissible(
+            key: Key(id),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: AppSpacing.xl),
+              decoration: BoxDecoration(
+                color: AppColors.error,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
             ),
+            confirmDismiss: (direction) async {
+              return await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: AppColors.darkSurface,
+                  title: const Text('Delete Recording'),
+                  content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            onDismissed: (direction) async {
+              try {
+                await _api.deleteRecording(id);
+                setState(() {
+                  _recordings.removeAt(index);
+                });
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Recording deleted')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to delete: $e')),
+                  );
+                }
+              }
+            },
+            child: _RecordingCard(
+              recording: recording,
+              onTap: () => _navigateToDetail(recording),
+            ),
+          );
+        },
       ),
     );
   }
@@ -147,6 +202,15 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.textSecondaryDark,
                   ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          FilledButton.icon(
+            onPressed: () => context.push('/record'),
+            icon: const Icon(Icons.mic_rounded),
+            label: const Text('Start Recording'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
             ),
           ),
         ],

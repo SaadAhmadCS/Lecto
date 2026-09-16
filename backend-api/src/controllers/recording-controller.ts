@@ -1,4 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { recordingService } from '../services/recording-service.js';
 import {
   createRecordingSchema,
@@ -7,13 +9,14 @@ import {
 } from '../validators/recording.js';
 import { successResponse, paginatedResponse } from '../utils/response.js';
 
-// Placeholder until auth is implemented
-const TEMP_USER_ID = 'dev-user-001';
+
+// Directory for uploaded audio files (relative to project root)
+const UPLOADS_DIR = join(process.cwd(), 'uploads');
 
 export class RecordingController {
   async list(request: FastifyRequest, reply: FastifyReply) {
     const query = listRecordingsQuerySchema.parse(request.query);
-    const result = await recordingService.list(TEMP_USER_ID, query);
+    const result = await recordingService.list(request.userId, query);
     return reply.send(
       paginatedResponse(
         result.recordings,
@@ -30,14 +33,14 @@ export class RecordingController {
   ) {
     const recording = await recordingService.getById(
       request.params.id,
-      TEMP_USER_ID,
+      request.userId,
     );
     return reply.send(successResponse(recording));
   }
 
   async create(request: FastifyRequest, reply: FastifyReply) {
     const data = createRecordingSchema.parse(request.body);
-    const recording = await recordingService.create(TEMP_USER_ID, data);
+    const recording = await recordingService.create(request.userId, data);
     return reply.status(201).send(successResponse(recording));
   }
 
@@ -48,7 +51,7 @@ export class RecordingController {
     const data = updateRecordingSchema.parse(request.body);
     const recording = await recordingService.update(
       request.params.id,
-      TEMP_USER_ID,
+      request.userId,
       data,
     );
     return reply.send(successResponse(recording));
@@ -58,7 +61,7 @@ export class RecordingController {
     request: FastifyRequest<{ Params: { id: string } }>,
     reply: FastifyReply,
   ) {
-    await recordingService.delete(request.params.id, TEMP_USER_ID);
+    await recordingService.delete(request.params.id, request.userId);
     return reply.status(204).send();
   }
 
@@ -66,19 +69,53 @@ export class RecordingController {
     request: FastifyRequest<{ Params: { id: string } }>,
     reply: FastifyReply,
   ) {
-    // For now, accept JSON metadata (file upload will come with multipart support)
-    const body = request.body as {
-      sequenceNumber: number;
-      filePath: string;
-      durationMs: number;
-      sizeBytes: number;
-    };
+    const recordingId = request.params.id;
 
+    // Parse multipart form data (audio file + metadata fields)
+    const data = await request.file();
+    if (!data) {
+      return reply.status(400).send({
+        error: { code: 'MISSING_FILE', message: 'Audio file is required (multipart field "file")' },
+      });
+    }
+
+    // Read metadata from form fields
+    const fields = data.fields as Record<string, { value?: string }>;
+    const sequenceNumber = parseInt(fields['sequenceNumber']?.value ?? '0', 10);
+    const durationMs = parseInt(fields['durationMs']?.value ?? '0', 10);
+
+    // Consume file buffer
+    const fileBuffer = await data.toBuffer();
+    const sizeBytes = fileBuffer.length;
+
+    // Determine file extension from mimetype
+    const ext = data.mimetype === 'audio/wav' ? 'wav'
+      : data.mimetype === 'audio/mp3' || data.mimetype === 'audio/mpeg' ? 'mp3'
+      : data.mimetype === 'audio/ogg' ? 'ogg'
+      : data.mimetype === 'audio/aac' ? 'aac'
+      : 'm4a'; // Default for audio/mp4, audio/x-m4a
+
+    // Save to uploads/{recordingId}/chunk_{seq}.{ext}
+    const recordingDir = join(UPLOADS_DIR, recordingId);
+    await mkdir(recordingDir, { recursive: true });
+    const fileName = `chunk_${String(sequenceNumber).padStart(3, '0')}.${ext}`;
+    const filePath = join(recordingDir, fileName);
+    await writeFile(filePath, fileBuffer);
+
+    console.log(`  📁 Saved chunk ${sequenceNumber} → ${filePath} (${(sizeBytes / 1024).toFixed(0)} KB)`);
+
+    // Store in DB with server-side file path
     const chunk = await recordingService.addChunk(
-      request.params.id,
-      TEMP_USER_ID,
-      body,
+      recordingId,
+      request.userId,
+      {
+        sequenceNumber,
+        filePath,
+        durationMs,
+        sizeBytes,
+      },
     );
+
     return reply.status(201).send(successResponse(chunk));
   }
 
@@ -88,7 +125,7 @@ export class RecordingController {
   ) {
     const chunks = await recordingService.getChunks(
       request.params.id,
-      TEMP_USER_ID,
+      request.userId,
     );
     return reply.send(successResponse(chunks));
   }

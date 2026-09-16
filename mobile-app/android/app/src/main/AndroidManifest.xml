@@ -42,7 +42,7 @@
 
         <!-- Foreground service for recording in background -->
         <service
-            android:name="com.ryanheise.audioservice.AudioService"
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="microphone"
             android:exported="false">
         </service>

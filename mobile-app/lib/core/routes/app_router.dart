@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/auth/presentation/screens/auth_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
+import '../../features/onboarding/presentation/screens/first_subject_screen.dart';
+import '../../features/onboarding/presentation/screens/onboarding_screen.dart';
 import '../../features/recording/presentation/screens/recording_detail_screen.dart';
 import '../../features/recording/presentation/screens/recording_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
@@ -13,6 +16,7 @@ import '../../shared/widgets/app_scaffold.dart';
 class AppRoutes {
   AppRoutes._();
 
+  static const String auth = '/auth';
   static const String splash = '/splash';
   static const String home = '/home';
   static const String subjects = '/subjects';
@@ -20,6 +24,8 @@ class AppRoutes {
   static const String transcripts = '/transcripts';
   static const String settings = '/settings';
   static const String recordingDetail = '/recording/:id';
+  static const String onboarding = '/onboarding';
+  static const String firstSubject = '/onboarding/first-subject';
 }
 
 /// GoRouter configuration for Lecto
@@ -34,9 +40,14 @@ class AppRouter {
   static final _shellNavigatorKey =
       GlobalKey<NavigatorState>();
 
-  static final GoRouter router = GoRouter(
+  static GoRouter router({
+    bool showOnboarding = false,
+    bool isAuthenticated = true,
+  }) => GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: AppRoutes.home,
+    initialLocation: !isAuthenticated 
+        ? AppRoutes.auth 
+        : (showOnboarding ? AppRoutes.onboarding : AppRoutes.home),
     routes: [
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
@@ -75,6 +86,18 @@ class AppRouter {
         ],
       ),
       // Full-screen routes (outside shell)
+      GoRoute(
+        path: AppRoutes.auth,
+        builder: (context, state) => const AuthScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.onboarding,
+        builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.firstSubject,
+        builder: (context, state) => const FirstSubjectScreen(),
+      ),
       GoRoute(
         path: AppRoutes.record,
         builder: (context, state) =>

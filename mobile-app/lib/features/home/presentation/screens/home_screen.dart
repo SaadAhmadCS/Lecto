@@ -40,14 +40,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadDashboard() async {
     try {
       final response = await _api.listRecordings(limit: 5);
-      final data = response['data'] as Map<String, dynamic>;
-      final recordings = (data['recordings'] as List<dynamic>)
+      final recordings = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
+      final meta = response['meta'] as Map<String, dynamic>?;
 
       if (mounted) {
         setState(() {
           _recentRecordings = recordings;
-          _totalRecordings = data['total'] as int? ?? 0;
+          _totalRecordings = meta?['total'] as int? ?? recordings.length;
           _isLoading = false;
           _hasError = false;
         });
@@ -149,13 +149,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/record'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.mic_rounded),
-        label: const Text('Record'),
       ),
     );
   }
@@ -340,6 +333,18 @@ class _HomeScreenState extends State<HomeScreen> {
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.textTertiaryDark,
                   ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _hasError = false;
+                });
+                _loadDashboard();
+              },
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
             ),
           ],
         ),

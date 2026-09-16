@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { authMiddleware } from './middleware/auth-middleware.js';
 import { healthRoutes } from './routes/health.js';
 import { subjectRoutes } from './routes/subjects.js';
 import { recordingRoutes } from './routes/recordings.js';
@@ -32,8 +34,17 @@ async function buildApp() {
     timeWindow: '1 minute',
   });
 
+  await app.register(multipart, {
+    limits: {
+      fileSize: 50 * 1024 * 1024, // 50 MB max per audio chunk
+      files: 1,
+    },
+  });
+
   // === Error Handler ===
   app.setErrorHandler(errorHandler);
+
+  app.addHook('preHandler', authMiddleware);
 
   // === Routes ===
   await app.register(healthRoutes);

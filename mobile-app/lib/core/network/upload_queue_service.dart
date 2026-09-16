@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/network/connectivity_service.dart';
 
@@ -14,6 +15,7 @@ import '../../core/network/connectivity_service.dart';
 /// Implements exponential backoff for failed uploads.
 class UploadQueueService {
   final ConnectivityService _connectivity;
+  final String baseUrl;
   final Queue<UploadTask> _queue = Queue<UploadTask>();
   final List<UploadTask> _completed = [];
   final List<UploadTask> _failed = [];
@@ -23,8 +25,10 @@ class UploadQueueService {
   Timer? _retryTimer;
   bool _isProcessing = false;
 
-  UploadQueueService({required ConnectivityService connectivity})
-      : _connectivity = connectivity;
+  UploadQueueService({
+    required ConnectivityService connectivity,
+    this.baseUrl = 'http://192.168.100.93:3000',
+  }) : _connectivity = connectivity;
 
   /// Stream of queue status updates.
   Stream<UploadQueueStatus> get statusStream => _statusController.stream;
@@ -42,6 +46,22 @@ class UploadQueueService {
         _processQueue();
       }
     });
+  }
+
+  /// Wait for all pending uploads to complete (or timeout).
+  /// Returns true if queue is empty, false if timed out.
+  Future<bool> waitForUploads({Duration timeout = const Duration(seconds: 30)}) async {
+    if (_queue.isEmpty && !_isProcessing) return true;
+
+    final deadline = DateTime.now().add(timeout);
+    while (_queue.isNotEmpty || _isProcessing) {
+      if (DateTime.now().isAfter(deadline)) {
+        debugPrint('UploadQueue: Timeout waiting for uploads (${_queue.length} remaining)');
+        return false;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return true;
   }
 
   /// Enqueue a chunk for upload.
@@ -160,6 +180,9 @@ class UploadQueueService {
   }
 
   /// Upload a single task to the backend.
+  ///
+  /// Audio chunks: POST multipart with binary audio file + metadata fields
+  /// Photos: POST multipart with image file + metadata fields
   Future<void> _uploadTask(UploadTask task) async {
     // Verify file exists before uploading
     final file = File(task.filePath);
@@ -167,35 +190,43 @@ class UploadQueueService {
       throw UploadException('File not found: ${task.filePath}');
     }
 
-    // TODO: Replace with actual HTTP upload via Dio
-    // For now, simulate upload with a delay
-    await Future.delayed(const Duration(milliseconds: 500));
+    switch (task.type) {
+      case UploadTaskType.audioChunk:
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$baseUrl/api/v1/recordings/${task.recordingId}/chunks'),
+        );
+        // Metadata fields
+        request.fields['sequenceNumber'] = '${task.metadata['sequenceNumber']}';
+        request.fields['durationMs'] = '${task.metadata['durationMs']}';
+        // Actual audio binary
+        request.files.add(
+          await http.MultipartFile.fromPath('file', task.filePath),
+        );
 
-    // In real implementation:
-    // final dio = sl<Dio>();
-    // switch (task.type) {
-    //   case UploadTaskType.audioChunk:
-    //     final formData = FormData.fromMap({
-    //       'file': await MultipartFile.fromFile(task.filePath),
-    //       'sequenceNumber': task.metadata['sequenceNumber'],
-    //       'durationMs': task.metadata['durationMs'],
-    //       'sizeBytes': task.metadata['sizeBytes'],
-    //     });
-    //     await dio.post(
-    //       '/api/v1/recordings/${task.recordingId}/chunks',
-    //       data: formData,
-    //     );
-    //   case UploadTaskType.photo:
-    //     final formData = FormData.fromMap({
-    //       'file': await MultipartFile.fromFile(task.filePath),
-    //       'timestampMs': task.metadata['timestampMs'],
-    //       'chunkIndex': task.metadata['chunkIndex'],
-    //     });
-    //     await dio.post(
-    //       '/api/v1/recordings/${task.recordingId}/photos',
-    //       data: formData,
-    //     );
-    // }
+        final streamedResponse = await request.send();
+        if (streamedResponse.statusCode >= 400) {
+          final respBody = await streamedResponse.stream.bytesToString();
+          throw UploadException('Chunk upload failed (${streamedResponse.statusCode}): $respBody');
+        }
+
+      case UploadTaskType.photo:
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$baseUrl/api/v1/recordings/${task.recordingId}/photos'),
+        );
+        request.fields['timestampMs'] = '${task.metadata['timestampMs']}';
+        request.fields['chunkIndex'] = '${task.metadata['chunkIndex']}';
+        request.files.add(
+          await http.MultipartFile.fromPath('file', task.filePath),
+        );
+
+        final streamedResponse = await request.send();
+        if (streamedResponse.statusCode >= 400) {
+          final respBody = await streamedResponse.stream.bytesToString();
+          throw UploadException('Photo upload failed (${streamedResponse.statusCode}): $respBody');
+        }
+    }
   }
 
   /// Retry all permanently failed tasks.

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -42,8 +41,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
     try {
       final response = await _api.listSubjects();
-      final data = response['data'] as Map<String, dynamic>;
-      final subjects = (data['subjects'] as List<dynamic>)
+      final subjects = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
 
       if (mounted) {
@@ -197,6 +195,154 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     );
   }
 
+  void _showEditDialog(Map<String, dynamic> subject) {
+    final id = subject['id'] as String;
+    final currentName = subject['name'] as String? ?? '';
+    final colorStr = subject['color'] as String? ?? '#6366F1';
+    
+    final nameController = TextEditingController(text: currentName);
+    
+    int selectedColorIndex = 0;
+    try {
+      final cardColor = Color(int.parse(colorStr.replaceFirst('#', '0xFF')));
+      final index = AppColors.subjectColors.indexWhere((c) => c.toARGB32() == cardColor.toARGB32());
+      if (index != -1) {
+        selectedColorIndex = index;
+      }
+    } catch (_) {}
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: AppSpacing.xl,
+                right: AppSpacing.xl,
+                top: AppSpacing.xl,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.xl,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.darkBorder,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  Text(
+                    'Edit Subject',
+                    style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  // Name input
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Subject name (e.g. Calculus)',
+                      prefixIcon: Icon(Icons.book_outlined),
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  // Color picker
+                  Text(
+                    'Color',
+                    style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                          color: AppColors.textSecondaryDark,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: List.generate(
+                      AppColors.subjectColors.length,
+                      (i) => GestureDetector(
+                        onTap: () => setSheetState(
+                          () => selectedColorIndex = i,
+                        ),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.subjectColors[i],
+                            borderRadius: BorderRadius.circular(10),
+                            border: selectedColorIndex == i
+                                ? Border.all(color: Colors.white, width: 2.5)
+                                : null,
+                          ),
+                          child: selectedColorIndex == i
+                              ? const Icon(Icons.check_rounded,
+                                  color: Colors.white, size: 20)
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+
+                  // Save button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        final name = nameController.text.trim();
+                        if (name.isEmpty) return;
+
+                        Navigator.of(ctx).pop();
+                        final colorHex = '#${AppColors.subjectColors[selectedColorIndex].toARGB32().toRadixString(16).substring(2)}';
+
+                        try {
+                          await _api.updateSubject(
+                            id,
+                            name: name,
+                            color: colorHex,
+                          );
+                          _loadSubjects();
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to update subject: $e'),
+                                backgroundColor: AppColors.error,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      child: const Text('Save Changes'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -211,6 +357,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       ),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'subjects_add_fab',
         onPressed: _showCreateDialog,
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
@@ -302,10 +449,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         itemCount: _subjects.length,
         itemBuilder: (context, index) => _SubjectCard(
           subject: _subjects[index],
-          onTap: () {
-            // Navigate to transcripts filtered by this subject
-            context.go('/transcripts');
-          },
+          onTap: () => _showEditDialog(_subjects[index]),
           onDelete: () => _deleteSubject(_subjects[index]['id'] as String),
         ),
       ),

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 
@@ -9,6 +12,7 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.read<AuthService>();
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -30,13 +34,27 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.timer_outlined,
                 title: 'Chunk Duration',
                 subtitle: '15 minutes',
-                onTap: () {},
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Coming soon'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
               _SettingsTile(
                 icon: Icons.audiotrack_rounded,
                 title: 'Audio Quality',
                 subtitle: 'High (AAC 128kbps)',
-                onTap: () {},
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Coming soon'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -52,7 +70,14 @@ class SettingsScreen extends StatelessWidget {
                 subtitle: 'After transcript is confirmed',
                 trailing: Switch(
                   value: true,
-                  onChanged: (_) {},
+                  onChanged: (_) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Coming soon'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                   activeThumbColor: AppColors.primary,
                 ),
               ),
@@ -60,7 +85,14 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.cleaning_services_rounded,
                 title: 'Clear Cache',
                 subtitle: 'Free up temporary files',
-                onTap: () {},
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Coming soon'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -76,7 +108,14 @@ class SettingsScreen extends StatelessWidget {
                 subtitle: 'Generate notes when recording stops',
                 trailing: Switch(
                   value: true,
-                  onChanged: (_) {},
+                  onChanged: (_) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Coming soon'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                   activeThumbColor: AppColors.primary,
                 ),
               ),
@@ -97,6 +136,52 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.code_rounded,
                 title: 'Made with',
                 subtitle: 'Flutter + Gemini + Whisper',
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+
+          // Account section
+          _buildSection(
+            context,
+            title: 'Account',
+            children: [
+              _SettingsTile(
+                icon: Icons.person_outline_rounded,
+                title: 'Account',
+                subtitle: auth.currentUser?.email ?? auth.currentUser?.displayName ?? 'Signed in',
+              ),
+              _SettingsTile(
+                icon: Icons.logout_rounded,
+                title: 'Sign Out',
+                subtitle: 'Sign out of your account',
+                onTap: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: AppColors.darkSurface,
+                      title: const Text('Sign Out'),
+                      content: const Text('Are you sure you want to sign out?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('Sign Out'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true && context.mounted) {
+                    await auth.signOut();
+                    if (context.mounted) {
+                      context.go('/auth');
+                    }
+                  }
+                },
               ),
             ],
           ),

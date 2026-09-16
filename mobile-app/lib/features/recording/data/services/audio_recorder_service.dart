@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import 'storage_monitor_service.dart';
+import '../../../../core/services/foreground_recording_service.dart';
 
 /// Core audio recording service for Lecto.
 ///
@@ -109,6 +110,8 @@ class AudioRecorderService {
     _isRecording = true;
     _isPaused = false;
 
+    await ForegroundRecordingService.startService();
+
     // Start duration tracking timer
     _durationTimer = Timer.periodic(
       const Duration(milliseconds: 200),
@@ -121,6 +124,11 @@ class AudioRecorderService {
             chunkDuration: _chunkDuration,
             chunkIndex: _currentChunkIndex,
           ));
+
+          // Update foreground notification every second
+          if (_totalDuration.inMilliseconds % 1000 < 200) {
+            ForegroundRecordingService.updateDuration(_totalDuration);
+          }
         }
       },
     );
@@ -153,6 +161,8 @@ class AudioRecorderService {
     _isPaused = false;
     _chunkTimer?.cancel();
     _durationTimer?.cancel();
+
+    await ForegroundRecordingService.stopService();
 
     // Stop and save the current chunk
     await _stopCurrentChunk();
