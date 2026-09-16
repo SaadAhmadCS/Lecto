@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
@@ -31,7 +32,10 @@ class RecordingDetailScreen extends StatefulWidget {
 class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  static const _waitingForUpload = 'waiting_upload';
+
   late final LectoApiClient _api = context.read<LectoApiClient>();
+  late final UploadQueueService _uploadQueue = context.read<UploadQueueService>();
   Timer? _pollTimer;
 
   // State
@@ -60,11 +64,25 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   }
 
   Future<void> _fetchStatus() async {
+    // Audio still in the on-device sync queue: the backend may not know this
+    // recording yet, so show upload progress instead of a 404 error.
+    if (!_uploadQueue.isRecordingFullyUploaded(widget.recordingId)) {
+      setState(() {
+        _processingStatus = _waitingForUpload;
+        _isLoading = false;
+        _error = null;
+      });
+      _pollTimer?.cancel();
+      _pollTimer = Timer(const Duration(seconds: 3), _fetchStatus);
+      return;
+    }
+
     try {
       final response = await _api.getProcessingStatus(widget.recordingId);
       final data = response['data'] as Map<String, dynamic>;
       final progress = data['progress'] as Map<String, dynamic>;
 
+      if (!mounted) return;
       setState(() {
         _processingStatus = data['processingStatus'] as String;
         _totalChunks = progress['totalChunks'] as int;
@@ -86,6 +104,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
         _pollTimer = Timer(const Duration(seconds: 3), _fetchStatus);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -537,6 +556,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 
   String _getStageLabel(String status) {
     switch (status) {
+      case _waitingForUpload:
+        return 'Uploading Audio...';
       case 'pending':
         return 'Queued';
       case 'transcribing':
@@ -556,6 +577,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 
   IconData _getStageIcon(String status) {
     switch (status) {
+      case _waitingForUpload:
+        return Icons.cloud_upload_outlined;
       case 'pending':
         return Icons.hourglass_empty_rounded;
       case 'transcribing':
@@ -573,6 +596,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 
   String _getStageDescription(String status) {
     switch (status) {
+      case _waitingForUpload:
+        return "Your recording is uploading from this device.\nIt continues automatically when you're online.";
       case 'pending':
         return 'Your recording is in the queue.\nProcessing will start shortly.';
       case 'transcribing':

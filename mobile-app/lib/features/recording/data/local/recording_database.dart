@@ -8,7 +8,7 @@ import 'package:sqflite/sqflite.dart';
 class RecordingDatabase {
   static Database? _database;
   static const String _dbName = 'lecto_recordings.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
 
   /// Get the database instance, creating it if needed.
   static Future<Database> get database async {
@@ -89,6 +89,8 @@ class RecordingDatabase {
     await db.execute(
       'CREATE UNIQUE INDEX idx_chunks_unique ON audio_chunks(recording_id, sequence_number)',
     );
+
+    await _createUploadTasksTable(db);
   }
 
   static Future<void> _onUpgrade(
@@ -96,7 +98,26 @@ class RecordingDatabase {
     int oldVersion,
     int newVersion,
   ) async {
-    // Future schema migrations go here
+    if (oldVersion < 2) {
+      await _createUploadTasksTable(db);
+    }
+  }
+
+  /// Persistent sync queue (v2). `seq` preserves enqueue order across restarts.
+  static Future<void> _createUploadTasksTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE upload_tasks (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL,
+        recording_id TEXT NOT NULL,
+        file_path TEXT,
+        metadata TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   /// Close the database.

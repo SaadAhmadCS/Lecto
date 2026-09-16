@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/network/connectivity_service.dart';
+import 'upload_task_store.dart';
 
 /// Manages the offline-first sync queue for recordings.
 ///
@@ -17,9 +18,12 @@ import '../../core/network/connectivity_service.dart';
 ///
 /// When online: tasks run immediately.
 /// When offline: tasks wait and resume when connectivity returns.
+/// Tasks are persisted, so work queued before an app kill resumes on the
+/// next launch.
 class UploadQueueService {
   final ConnectivityService _connectivity;
   final LectoApiClient _api;
+  final UploadTaskStore _store;
   final Queue<UploadTask> _queue = Queue<UploadTask>();
   final List<UploadTask> _completed = [];
   final List<UploadTask> _failed = [];
@@ -29,11 +33,16 @@ class UploadQueueService {
   Timer? _retryTimer;
   bool _isProcessing = false;
 
+  // Store writes are chained so they hit the database in call order.
+  Future<void> _storeOps = Future.value();
+
   UploadQueueService({
     required ConnectivityService connectivity,
     required LectoApiClient apiClient,
+    required UploadTaskStore store,
   })  : _connectivity = connectivity,
-        _api = apiClient;
+        _api = apiClient,
+        _store = store;
 
   /// Stream of queue status updates.
   Stream<UploadQueueStatus> get statusStream => _statusController.stream;
@@ -43,14 +52,31 @@ class UploadQueueService {
   int get completedCount => _completed.length;
   int get failedCount => _failed.length;
 
-  /// Initialize and listen for connectivity changes.
-  void initialize() {
+  /// Restore persisted tasks, listen for connectivity, and resume work.
+  Future<void> initialize() async {
+    for (final task in await _store.loadAll()) {
+      if (task.status == UploadTaskStatus.failed) {
+        _failed.add(task);
+      } else {
+        task.status = UploadTaskStatus.pending;
+        _queue.add(task);
+      }
+    }
+    if (_queue.isNotEmpty) {
+      debugPrint('UploadQueue: Restored ${_queue.length} pending task(s)');
+    }
+
     _connectivitySub = _connectivity.onConnectivityChanged.listen((connected) {
       if (connected && _queue.isNotEmpty) {
         debugPrint('UploadQueue: Connectivity restored, processing queue...');
         _processQueue();
       }
     });
+
+    _emitStatus();
+    if (_connectivity.isConnected) {
+      _processQueue();
+    }
   }
 
   /// Enqueue creation of the recording on the backend.
@@ -104,7 +130,9 @@ class UploadQueueService {
   }
 
   void _enqueue(UploadTask task) {
+    if (_queue.any((t) => t.id == task.id)) return;
     _queue.add(task);
+    _persist(() => _store.save(task));
     _emitStatus();
     debugPrint('UploadQueue: Enqueued ${task.id}');
 
@@ -135,6 +163,7 @@ class UploadQueueService {
         _queue.removeFirst();
         task.status = UploadTaskStatus.completed;
         _completed.add(task);
+        _persist(() => _store.delete(task.id));
         _emitStatus();
         debugPrint('UploadQueue: ✅ ${task.id}');
       } catch (e) {
@@ -144,12 +173,14 @@ class UploadQueueService {
           _queue.removeFirst();
           task.status = UploadTaskStatus.failed;
           _failed.add(task);
+          _persist(() => _store.update(task));
           _emitStatus();
           debugPrint('UploadQueue: Task ${task.id} permanently failed after ${task.attempts} attempts');
         } else {
           // Keep the task at the head so later tasks for the same recording
           // don't run out of order.
           task.status = UploadTaskStatus.pending;
+          _persist(() => _store.update(task));
           _emitStatus();
 
           // Exponential backoff before retrying
@@ -205,6 +236,7 @@ class UploadQueueService {
       task.attempts = 0;
       task.status = UploadTaskStatus.pending;
       _queue.add(task);
+      _persist(() => _store.update(task));
     }
     _failed.clear();
     _emitStatus();
@@ -227,6 +259,12 @@ class UploadQueueService {
   bool isRecordingFullyUploaded(String recordingId) {
     final pending = _queue.where((t) => t.recordingId == recordingId);
     return pending.isEmpty;
+  }
+
+  void _persist(Future<void> Function() op) {
+    _storeOps = _storeOps.then((_) => op()).catchError((Object e) {
+      debugPrint('UploadQueue: Failed to persist task change: $e');
+    });
   }
 
   void _emitStatus() {
@@ -267,7 +305,8 @@ class UploadTask {
     required this.metadata,
     this.status = UploadTaskStatus.pending,
     this.attempts = 0,
-  }) : createdAt = DateTime.now();
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
 }
 
 enum UploadTaskType { createRecording, audioChunk, completeRecording }

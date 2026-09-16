@@ -6,6 +6,7 @@ import '../network/connectivity_service.dart';
 import '../network/upload_queue_service.dart';
 import '../permissions/permission_service.dart';
 import '../../features/recording/data/local/recording_dao.dart';
+import '../../features/recording/data/local/sqlite_upload_task_store.dart';
 import '../../features/recording/data/services/audio_recorder_service.dart';
 import '../../features/recording/data/services/photo_capture_service.dart';
 import '../../features/recording/data/services/storage_monitor_service.dart';
@@ -27,15 +28,22 @@ Future<void> initServiceLocator() async {
     () => PermissionService(),
   );
 
+  // === Auth & API Client ===
+  sl.registerLazySingleton<AuthService>(() => AuthService());
+
+  sl.registerLazySingleton<LectoApiClient>(
+    () => LectoApiClient(tokenProvider: () => sl<AuthService>().getIdToken()),
+  );
+
   // === Upload Queue ===
-  sl.registerLazySingleton<UploadQueueService>(() {
-    final service = UploadQueueService(
-      connectivity: sl<ConnectivityService>(),
-      apiClient: sl<LectoApiClient>(),
-    );
-    service.initialize();
-    return service;
-  });
+  // Created eagerly so tasks persisted before an app kill resume at launch.
+  final uploadQueue = UploadQueueService(
+    connectivity: sl<ConnectivityService>(),
+    apiClient: sl<LectoApiClient>(),
+    store: SqliteUploadTaskStore(),
+  );
+  await uploadQueue.initialize();
+  sl.registerSingleton<UploadQueueService>(uploadQueue);
 
   // === Recording Services ===
   sl.registerLazySingleton<StorageMonitorService>(
@@ -55,12 +63,5 @@ Future<void> initServiceLocator() async {
   // === Data Layer ===
   sl.registerLazySingleton<RecordingDao>(
     () => RecordingDao(),
-  );
-
-  // === Auth & API Client ===
-  sl.registerLazySingleton<AuthService>(() => AuthService());
-
-  sl.registerLazySingleton<LectoApiClient>(
-    () => LectoApiClient(tokenProvider: () => sl<AuthService>().getIdToken()),
   );
 }
