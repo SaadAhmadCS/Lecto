@@ -78,6 +78,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     int selectedColorIndex = 0;
 
     showModalBottomSheet(
+      useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.darkSurface,
@@ -227,6 +228,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     } catch (_) {}
 
     showModalBottomSheet(
+      useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.darkSurface,
@@ -512,6 +514,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
   void _showSubjectMenu(Map<String, dynamic> subject) {
     showModalBottomSheet(
+      useRootNavigator: true,
       context: context,
       backgroundColor: AppColors.darkSurface,
       shape: const RoundedRectangleBorder(

@@ -325,33 +325,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   }
 
   Future<void> _renameRecording() async {
-    final controller = TextEditingController(text: _title);
     final newTitle = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.darkSurface,
-        title: const Text('Rename recording'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: AppConstants.maxRecordingTitleLength,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'Recording title'),
-          onSubmitted: (value) => Navigator.of(ctx).pop(value.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (_) => _RenameRecordingDialog(initialTitle: _title),
     );
-    controller.dispose();
 
     if (newTitle == null || newTitle.isEmpty || newTitle == _title) return;
 
@@ -997,3 +974,51 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 }
 
 enum _DetailAction { rename, move, copy, delete }
+
+/// Owns its controller so it's disposed only after the dialog's close
+/// animation finishes, not while the TextField is still on screen.
+class _RenameRecordingDialog extends StatefulWidget {
+  final String initialTitle;
+
+  const _RenameRecordingDialog({required this.initialTitle});
+
+  @override
+  State<_RenameRecordingDialog> createState() => _RenameRecordingDialogState();
+}
+
+class _RenameRecordingDialogState extends State<_RenameRecordingDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialTitle);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.darkSurface,
+      title: const Text('Rename recording'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: AppConstants.maxRecordingTitleLength,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(hintText: 'Recording title'),
+        onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
