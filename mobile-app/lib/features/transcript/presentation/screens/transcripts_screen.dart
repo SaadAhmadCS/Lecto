@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -50,7 +51,7 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = ErrorMessages.from(e);
         _isLoading = false;
       });
     }
@@ -153,7 +154,7 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to delete: $e')),
+                    SnackBar(content: Text(ErrorMessages.from(e, action: 'delete the recording'))),
                   );
                 }
               }
@@ -240,7 +241,7 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Make sure the backend is running.',
+              _error ?? ErrorMessages.generic,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.textSecondaryDark,
                   ),

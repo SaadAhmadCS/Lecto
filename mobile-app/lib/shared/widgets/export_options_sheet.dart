@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/errors/error_messages.dart';
 import '../../core/services/pdf_export_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
@@ -49,7 +50,7 @@ class _ExportOptionsSheetState extends State<ExportOptionsSheet> {
       if (mounted) {
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to generate PDF: $e')),
+          SnackBar(content: Text(ErrorMessages.from(e, action: 'create the PDF'))),
         );
       }
     }

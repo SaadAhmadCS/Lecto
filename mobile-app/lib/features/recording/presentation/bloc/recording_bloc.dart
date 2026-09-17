@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../../core/errors/error_messages.dart';
 import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/permissions/permission_service.dart';
@@ -134,7 +135,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       await _recorderService.startRecording(recordingId);
     } catch (e) {
       emit(RecordingError(
-        message: 'Failed to start recording: $e',
+        message: ErrorMessages.from(e, action: 'start recording'),
         canRetry: true,
       ));
       return;

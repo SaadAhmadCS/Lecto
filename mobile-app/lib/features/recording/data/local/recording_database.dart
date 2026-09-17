@@ -120,6 +120,16 @@ class RecordingDatabase {
     ''');
   }
 
+  /// Delete every row (sign-out). The schema stays in place.
+  static Future<void> clearAll() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final table in ['photos', 'audio_chunks', 'recordings', 'upload_tasks']) {
+        await txn.delete(table);
+      }
+    });
+  }
+
   /// Close the database.
   static Future<void> close() async {
     final db = _database;

@@ -34,6 +34,10 @@ class UploadQueueService {
   Timer? _retryTimer;
   bool _isProcessing = false;
 
+  // Bumped by [clear]; a task that was in flight before a clear must not
+  // touch the emptied queue when it returns.
+  int _generation = 0;
+
   // Store writes are chained so they hit the database in call order.
   Future<void> _storeOps = Future.value();
 
@@ -55,6 +59,11 @@ class UploadQueueService {
   int get pendingCount => _queue.length;
   int get completedCount => _completed.length;
   int get failedCount => _failed.length;
+
+  /// Recordings with queued or permanently failed work — what would be lost
+  /// if the queue were cleared now.
+  int get unsyncedRecordingCount =>
+      [..._queue, ..._failed].map((t) => t.recordingId).toSet().length;
 
   /// Restore persisted tasks, listen for connectivity, and resume work.
   Future<void> initialize() async {
@@ -138,6 +147,17 @@ class UploadQueueService {
     ));
   }
 
+  /// Enqueue removing the recording from the backend. Queued behind any
+  /// pending create, so it also works for recordings that never synced.
+  void enqueueDeleteRecording({required String recordingId}) {
+    _enqueue(UploadTask(
+      id: '${recordingId}_delete',
+      type: UploadTaskType.deleteRecording,
+      recordingId: recordingId,
+      metadata: const {},
+    ));
+  }
+
   void _enqueue(UploadTask task) {
     if (_queue.any((t) => t.id == task.id)) return;
     _queue.add(task);
@@ -155,6 +175,7 @@ class UploadQueueService {
   Future<void> _processQueue() async {
     if (_isProcessing || _queue.isEmpty) return;
     _isProcessing = true;
+    final generation = _generation;
 
     while (_queue.isNotEmpty) {
       if (!_connectivity.isConnected) {
@@ -169,6 +190,7 @@ class UploadQueueService {
 
       try {
         await _runTask(task);
+        if (generation != _generation) return;
         _queue.removeFirst();
         task.status = UploadTaskStatus.completed;
         _completed.add(task);
@@ -177,6 +199,7 @@ class UploadQueueService {
         _emitStatus();
         debugPrint('UploadQueue: ✅ ${task.id}');
       } catch (e) {
+        if (generation != _generation) return;
         debugPrint('UploadQueue: ❌ Failed ${task.id} (attempt ${task.attempts}): $e');
 
         if (task.attempts >= UploadTask.maxRetries) {
@@ -238,6 +261,14 @@ class UploadQueueService {
           task.recordingId,
           totalDurationMs: task.metadata['totalDurationMs'] as int,
         );
+
+      case UploadTaskType.deleteRecording:
+        try {
+          await _api.deleteRecording(task.recordingId);
+        } on ApiException catch (e) {
+          // Never reached the backend, or already deleted
+          if (e.statusCode != 404) rethrow;
+        }
     }
   }
 
@@ -255,6 +286,20 @@ class UploadQueueService {
     if (_connectivity.isConnected) {
       _processQueue();
     }
+  }
+
+  /// Drop all queued, completed and failed tasks, in memory and on disk.
+  /// Used on sign-out so one account's uploads never run as another's.
+  Future<void> clear() async {
+    _generation++;
+    _retryTimer?.cancel();
+    _queue.clear();
+    _completed.clear();
+    _failed.clear();
+    _isProcessing = false;
+    _persist(_store.deleteAll);
+    await _storeOps;
+    _emitStatus();
   }
 
   /// Get all tasks for a specific recording.
@@ -321,7 +366,7 @@ class UploadTask {
   }) : createdAt = createdAt ?? DateTime.now();
 }
 
-enum UploadTaskType { createRecording, audioChunk, completeRecording }
+enum UploadTaskType { createRecording, audioChunk, completeRecording, deleteRecording }
 
 enum UploadTaskStatus { pending, uploading, completed, failed }
 

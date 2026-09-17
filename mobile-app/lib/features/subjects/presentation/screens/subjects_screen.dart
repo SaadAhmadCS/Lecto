@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -190,7 +191,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Failed to create subject: $e'),
+                                content: Text(ErrorMessages.from(e, action: 'create the subject')),
                                 backgroundColor: AppColors.error,
                               ),
                             );
@@ -344,7 +345,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Failed to update subject: $e'),
+                                content: Text(ErrorMessages.from(e, action: 'update the subject')),
                                 backgroundColor: AppColors.error,
                               ),
                             );
@@ -581,7 +582,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to delete: $e'),
+              content: Text(ErrorMessages.from(e, action: 'delete the subject')),
               backgroundColor: AppColors.error,
             ),
           );

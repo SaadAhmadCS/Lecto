@@ -19,10 +19,10 @@ class AuthService {
     return await _auth.currentUser?.getIdToken();
   }
 
-  /// Sign in with Google
-  Future<UserCredential> signInWithGoogle() async {
+  /// Sign in with Google. Returns null if the user closed the account picker.
+  Future<UserCredential?> signInWithGoogle() async {
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-    if (googleUser == null) throw Exception('Google sign-in was cancelled');
+    if (googleUser == null) return null;
     
     final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
     final credential = GoogleAuthProvider.credential(

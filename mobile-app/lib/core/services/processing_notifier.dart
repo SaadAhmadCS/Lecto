@@ -26,6 +26,8 @@ class ProcessingNotifier {
   static const _maxPolls = 720;
 
   final Set<String> _watching = {};
+  // Bumped by [reset] so polls scheduled before it stop.
+  int _generation = 0;
   StreamSubscription<UploadTask>? _queueSub;
 
   ProcessingNotifier({
@@ -45,15 +47,23 @@ class ProcessingNotifier {
   void watch(String recordingId) {
     if (!_watching.add(recordingId)) return;
     _notifications.requestPermissionIfNeeded();
-    _poll(recordingId, 0);
+    _poll(recordingId, 0, _generation);
   }
 
-  Future<void> _poll(String recordingId, int attempt) async {
+  /// Stop watching everything (sign-out).
+  void reset() {
+    _generation++;
+    _watching.clear();
+  }
+
+  Future<void> _poll(String recordingId, int attempt, int generation) async {
+    if (generation != _generation) return;
     try {
       final response = await _api.getProcessingStatus(recordingId);
       final data = response['data'] as Map<String, dynamic>;
       final status = data['processingStatus'] as String? ?? '';
 
+      if (generation != _generation) return;
       if (status == 'completed' || status.startsWith('failed')) {
         _watching.remove(recordingId);
         await _notify(recordingId, succeeded: status == 'completed');
@@ -68,7 +78,7 @@ class ProcessingNotifier {
       _watching.remove(recordingId);
       return;
     }
-    Timer(_pollInterval, () => _poll(recordingId, attempt + 1));
+    Timer(_pollInterval, () => _poll(recordingId, attempt + 1, generation));
   }
 
   Future<void> _notify(String recordingId, {required bool succeeded}) async {

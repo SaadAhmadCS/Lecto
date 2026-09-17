@@ -4,6 +4,7 @@ import '../network/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../services/processing_notifier.dart';
+import '../services/session_service.dart';
 import '../network/connectivity_service.dart';
 import '../network/upload_queue_service.dart';
 import '../permissions/permission_service.dart';
@@ -11,6 +12,7 @@ import '../../features/recording/data/local/recording_dao.dart';
 import '../../features/recording/data/local/sqlite_upload_task_store.dart';
 import '../../features/recording/data/services/audio_recorder_service.dart';
 import '../../features/recording/data/services/photo_capture_service.dart';
+import '../../features/recording/data/services/recording_recovery_service.dart';
 import '../../features/recording/data/services/storage_monitor_service.dart';
 
 final sl = GetIt.instance;
@@ -60,6 +62,15 @@ Future<void> initServiceLocator() async {
     )..start(),
   );
 
+  sl.registerLazySingleton<SessionService>(
+    () => SessionService(
+      auth: sl<AuthService>(),
+      uploadQueue: uploadQueue,
+      processingNotifier: sl<ProcessingNotifier>(),
+      notifications: notifications,
+    ),
+  );
+
   // === Recording Services ===
   sl.registerLazySingleton<StorageMonitorService>(
     () => StorageMonitorService(),
@@ -78,5 +89,12 @@ Future<void> initServiceLocator() async {
   // === Data Layer ===
   sl.registerLazySingleton<RecordingDao>(
     () => RecordingDao(),
+  );
+
+  sl.registerLazySingleton<RecordingRecoveryService>(
+    () => RecordingRecoveryService(
+      dao: sl<RecordingDao>(),
+      uploadQueue: uploadQueue,
+    ),
   );
 }

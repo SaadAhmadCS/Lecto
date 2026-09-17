@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/services/processing_notifier.dart';
@@ -130,7 +131,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = ErrorMessages.from(e);
         _isLoading = false;
       });
     }
@@ -169,7 +170,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       _fetchStatus();
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = ErrorMessages.from(e);
         _isLoading = false;
       });
     }
@@ -338,7 +339,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       setState(() => _title = newTitle);
       _showSnack('Recording renamed');
     } catch (e) {
-      _showSnack('Failed to rename: $e');
+      _showSnack(ErrorMessages.from(e, action: 'rename the recording'));
     }
   }
 
@@ -428,7 +429,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       setState(() => _subject = data['subject'] as Map<String, dynamic>?);
       _showSnack('Moved to ${target['name']}');
     } catch (e) {
-      _showSnack('Failed to move: $e');
+      _showSnack(ErrorMessages.from(e, action: 'move the recording'));
     }
   }
 
@@ -462,7 +463,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       Navigator.of(context).pop();
       _showSnack('Recording deleted');
     } catch (e) {
-      _showSnack('Failed to delete: $e');
+      _showSnack(ErrorMessages.from(e, action: 'delete the recording'));
     }
   }
 
@@ -828,7 +829,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Could not reach the server.\nMake sure the backend is running.',
+              _error ?? ErrorMessages.generic,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: AppColors.textSecondaryDark,

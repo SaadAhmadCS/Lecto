@@ -64,6 +64,8 @@ class NotificationService {
     }
   }
 
+  Future<void> cancelAll() => _plugin.cancelAll();
+
   Future<void> showRecordingUpdate({
     required String recordingId,
     required String title,

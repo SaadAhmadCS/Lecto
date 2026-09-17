@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/session_service.dart';
+import '../../../recording/data/services/audio_recorder_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 
@@ -157,39 +159,63 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.logout_rounded,
                 title: 'Sign Out',
                 subtitle: 'Sign out of your account',
-                onTap: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      backgroundColor: AppColors.darkSurface,
-                      title: const Text('Sign Out'),
-                      content: const Text('Are you sure you want to sign out?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(ctx).pop(false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          style: TextButton.styleFrom(foregroundColor: AppColors.error),
-                          onPressed: () => Navigator.of(ctx).pop(true),
-                          child: const Text('Sign Out'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirm == true && context.mounted) {
-                    await auth.signOut();
-                    if (context.mounted) {
-                      context.go('/auth');
-                    }
-                  }
-                },
+                onTap: () => _signOut(context),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _signOut(BuildContext context) async {
+    if (context.read<AudioRecorderService>().isRecording) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Stop the current recording before signing out.')),
+      );
+      return;
+    }
+
+    final session = context.read<SessionService>();
+    final unsynced = session.unsyncedRecordingCount;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Sign Out'),
+        content: Text(
+          unsynced == 0
+              ? 'Your recordings are saved to your account. Audio kept on '
+                  'this device will be removed.'
+              : '$unsynced ${unsynced == 1 ? 'recording hasn\'t' : 'recordings haven\'t'} '
+                  'finished uploading. Signing out now deletes '
+                  '${unsynced == 1 ? 'it' : 'them'} permanently.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(unsynced == 0 ? 'Sign Out' : 'Sign Out Anyway'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+
+    try {
+      await session.signOut();
+      if (context.mounted) context.go('/auth');
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Couldn\'t sign out. Please try again.')),
+        );
+      }
+    }
   }
 
   Widget _buildSection(

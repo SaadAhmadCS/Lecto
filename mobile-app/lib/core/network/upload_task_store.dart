@@ -12,4 +12,6 @@ abstract class UploadTaskStore {
   Future<void> update(UploadTask task);
 
   Future<void> delete(String id);
+
+  Future<void> deleteAll();
 }

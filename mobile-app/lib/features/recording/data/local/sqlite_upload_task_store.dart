@@ -63,4 +63,10 @@ class SqliteUploadTaskStore implements UploadTaskStore {
     final db = await RecordingDatabase.database;
     await db.delete(_table, where: 'id = ?', whereArgs: [id]);
   }
+
+  @override
+  Future<void> deleteAll() async {
+    final db = await RecordingDatabase.database;
+    await db.delete(_table);
+  }
 }

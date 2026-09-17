@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/errors/error_messages.dart';
 import '../../../../core/services/auth_service.dart';
+import '../widgets/reset_password_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 
@@ -13,28 +16,38 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final _authService = AuthService();
+  // The app-wide instance, so signing out also signs out of this Google
+  // account and the next Google sign-in shows the account picker.
+  late final AuthService _authService = context.read<AuthService>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
   bool _isSignIn = true;
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
     try {
-      await _authService.signInWithGoogle();
-      _navigateToNext();
+      final credential = await _authService.signInWithGoogle();
+      if (credential != null) _navigateToNext();
     } catch (e) {
-      _showError(e.toString());
+      _showError(ErrorMessages.from(e, action: 'sign in with Google'));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _handleEmailAuth() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || _passwordController.text.isEmpty) {
       _showError('Please fill in all fields');
       return;
     }
@@ -42,22 +55,39 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = true);
     try {
       if (_isSignIn) {
-        await _authService.signInWithEmail(
-          _emailController.text,
-          _passwordController.text,
-        );
+        await _authService.signInWithEmail(email, _passwordController.text);
       } else {
-        await _authService.signUpWithEmail(
-          _emailController.text,
-          _passwordController.text,
-        );
+        await _authService.signUpWithEmail(email, _passwordController.text);
       }
       _navigateToNext();
     } catch (e) {
-      _showError(e.toString());
+      _showError(ErrorMessages.from(
+        e,
+        action: _isSignIn ? 'sign in' : 'create your account',
+      ));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final sentTo = await showDialog<String>(
+      context: context,
+      builder: (_) => ResetPasswordDialog(
+        authService: _authService,
+        initialEmail: _emailController.text.trim(),
+      ),
+    );
+    if (sentTo == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'If an account exists for $sentTo, a reset link is on its way. '
+          'Check your spam folder too.',
+        ),
+        duration: const Duration(seconds: 6),
+      ),
+    );
   }
 
   Future<void> _navigateToNext() async {
@@ -173,7 +203,19 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.lg),
+                if (_isSignIn)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _handleForgotPassword,
+                      child: const Text(
+                        'Forgot password?',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(height: AppSpacing.lg),
 
                 ElevatedButton(
                   onPressed: _isLoading ? null : _handleEmailAuth,
