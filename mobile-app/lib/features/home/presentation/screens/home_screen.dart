@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../features/recording/data/local/local_recording_feed.dart';
+import '../../../../features/recording/data/local/recording_dao.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 
@@ -21,6 +23,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final LectoApiClient _api = context.read<LectoApiClient>();
+  late final LocalRecordingFeed _localFeed =
+      LocalRecordingFeed(dao: context.read<RecordingDao>());
   List<Map<String, dynamic>> _recentRecordings = [];
   int _totalRecordings = 0;
   bool _isLoading = true;
@@ -33,16 +37,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadDashboard() async {
+    // Recordings kept on this device never reach the backend, so they have to
+    // be merged in or they would not appear anywhere.
+    final local = await _localFeed.list();
+
     try {
       final response = await _api.listRecordings(limit: 5);
       final recordings = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
       final meta = response['meta'] as Map<String, dynamic>?;
+      final merged = LocalRecordingFeed.merge(recordings, local);
 
       if (mounted) {
         setState(() {
-          _recentRecordings = recordings;
-          _totalRecordings = meta?['total'] as int? ?? recordings.length;
+          _recentRecordings = merged.take(5).toList();
+          _totalRecordings =
+              (meta?['total'] as int? ?? recordings.length) + local.length;
           _isLoading = false;
           _hasError = false;
         });
@@ -50,8 +60,11 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
+          // Offline is not empty when there are recordings on the device.
+          _recentRecordings = local.take(5).toList();
+          _totalRecordings = local.length;
           _isLoading = false;
-          _hasError = true;
+          _hasError = local.isEmpty;
         });
       }
     }

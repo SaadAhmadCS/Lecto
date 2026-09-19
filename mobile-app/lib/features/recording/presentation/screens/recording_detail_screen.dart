@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/notes_source.dart';
 import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/upload_queue_service.dart';
+import '../../../../core/routes/app_router.dart';
 import '../../../../core/services/ai_share_service.dart';
 import '../../../../core/services/notes_parser.dart';
 import '../../../../core/services/processing_notifier.dart';
@@ -653,6 +655,21 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     return Scaffold(
       backgroundColor: AppColors.darkBg,
       appBar: AppBar(
+        // Always offer a way out. Arriving from a notification tap on a cold
+        // start leaves nothing to pop, which previously stranded the user here.
+        leading: _isSearching
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                tooltip: 'Back',
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go(AppRoutes.home);
+                  }
+                },
+              ),
         title: _isSearching
             ? _buildSearchField()
             : GestureDetector(

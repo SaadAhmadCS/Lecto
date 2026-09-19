@@ -8,6 +8,8 @@ import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../features/recording/data/local/local_recording_feed.dart';
+import '../../../../features/recording/data/local/recording_dao.dart';
 import '../../../../shared/widgets/recording_card.dart';
 
 /// Transcripts screen — view all recordings with their processing status.
@@ -23,6 +25,8 @@ class TranscriptsScreen extends StatefulWidget {
 
 class _TranscriptsScreenState extends State<TranscriptsScreen> {
   late final LectoApiClient _api = context.read<LectoApiClient>();
+  late final LocalRecordingFeed _localFeed =
+      LocalRecordingFeed(dao: context.read<RecordingDao>());
   List<Map<String, dynamic>> _recordings = [];
   RecordingSort _sort = RecordingSort.date;
   bool _isLoading = true;
@@ -40,18 +44,28 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
       _error = null;
     });
 
+    // On-device recordings first: they are always available, so the list still
+    // shows something useful when the backend is unreachable.
+    final local = await _localFeed.list();
+
     try {
       final response = await _api.listRecordings(limit: 50);
       final recordings = (response['data'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
 
       setState(() {
-        _recordings = _sort.apply(recordings);
+        _recordings = _sort.apply(LocalRecordingFeed.merge(recordings, local));
         _isLoading = false;
       });
     } catch (e) {
       setState(() {
-        _error = ErrorMessages.from(e);
+        // Offline with local recordings is not an error state — show them.
+        if (local.isNotEmpty) {
+          _recordings = _sort.apply(local);
+          _error = null;
+        } else {
+          _error = ErrorMessages.from(e);
+        }
         _isLoading = false;
       });
     }
@@ -142,7 +156,13 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
             },
             onDismissed: (direction) async {
               try {
-                await _api.deleteRecording(id);
+                // A local-only recording was never sent, so deleting it on the
+                // backend would 404.
+                if (recording['isLocalOnly'] == true) {
+                  await context.read<RecordingDao>().deleteRecording(id);
+                } else {
+                  await _api.deleteRecording(id);
+                }
                 setState(() {
                   _recordings.removeAt(index);
                 });

@@ -421,13 +421,24 @@ class _RecordingScreenBody extends StatelessWidget {
             FilledButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                // Navigate to recording detail to see processing status
-                context.go(
+                // push, not go: go replaces the stack, which left the detail
+                // screen with nothing to pop back to.
+                context.push(
                   '/recording/${state.recordingId}?title=Recording',
                 );
               },
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: const Text('View Notes'),
+              icon: Icon(
+                state.notesSource.uploadsAudio
+                    ? Icons.auto_awesome_rounded
+                    : Icons.ios_share_rounded,
+              ),
+              // In "my own AI app" mode there is nothing to wait for — the next
+              // step is the share, so say that rather than "View Notes".
+              label: Text(
+                state.notesSource.uploadsAudio
+                    ? 'View Notes'
+                    : 'Share to your AI',
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(

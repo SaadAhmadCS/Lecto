@@ -98,6 +98,117 @@ A long lecture.
     });
   });
 
+  group('a real Gemini reply', () {
+    // Verbatim from the Gemini Android app on 2026-09-19. Copying a reply out
+    // of the app strips markdown: headings arrive as bare lines and bullets as
+    // " * ". An earlier parser only matched "##" headings, so every section
+    // except Tasks came back empty.
+    const geminiReply = '''
+Summary
+Based on the guidelines provided, this is a summary of the computer science advanced database lecture. The session focused on basic SQL commands and preparation for MongoDB.
+Key Concepts
+ * SQL commands — basic database instructions that will appear in the upcoming paper.
+ * MongoDB — a database system that students are required to install before the next class.
+Tasks
+ * [ ] Study basic SQL commands for the upcoming quiz and paper.
+ * [ ] Install MongoDB before the next class.
+ * [ ] Open your PC during the current class to test all basic SQL commands.
+Deadlines
+ * 2026-09-26 — Quiz on basic SQL commands during the next week's class.
+Transcript
+Hey hello, this is your computer science advanced database lecture.
+''';
+
+    test('every section is recovered despite the missing markdown', () {
+      final notes = NotesParser.parse(geminiReply);
+
+      expect(notes.summary, contains('advanced database lecture'));
+      expect(notes.concepts, hasLength(2));
+      expect(notes.concepts.first, contains('SQL commands'));
+      expect(notes.tasks, hasLength(3));
+      expect(notes.deadlines, hasLength(1));
+      expect(notes.deadlines.single.date, DateTime(2026, 9, 26));
+      expect(notes.hasTranscript, isTrue);
+    });
+
+    test('its tasks still toggle', () {
+      final notes = NotesParser.parse(geminiReply);
+      final updated = NotesParser.toggleTask(geminiReply, notes.tasks[1]);
+      final reparsed = NotesParser.parse(updated);
+
+      expect(reparsed.tasks[1].done, isTrue);
+      expect(reparsed.tasks[0].done, isFalse);
+      expect(reparsed.concepts, hasLength(2));
+    });
+  });
+
+  group('never loses content', () {
+    test('keeps sections under headings it does not recognise', () {
+      final notes = NotesParser.parse('''
+## Summary
+A lecture.
+
+## Exam Tips
+- Revise the second half of the syllabus.
+''');
+
+      expect(notes.summary, contains('lecture'));
+      expect(notes.extraSections, hasLength(1));
+      expect(notes.extraSections.single.title, 'Exam Tips');
+      expect(notes.extraSections.single.body, contains('second half'));
+    });
+
+    test('keeps text written before any heading', () {
+      final notes = NotesParser.parse('''
+Here are your notes for today.
+
+## Summary
+A lecture.
+''');
+
+      expect(notes.extraSections.single.body, contains('notes for today'));
+      expect(notes.summary, contains('lecture'));
+    });
+
+    test('a heading-like sentence is not mistaken for a heading', () {
+      final notes = NotesParser.parse(
+        'The summary of this lecture is that databases are useful.',
+      );
+
+      expect(notes.summary, isNull);
+      expect(notes.extraSections.single.body, contains('databases are useful'));
+    });
+  });
+
+  group('heading synonyms seen in the wild', () {
+    test('matches on keywords, not exact titles', () {
+      final notes = NotesParser.parse('''
+Key Concepts & Definitions
+ * Entropy — disorder.
+Action Items
+ * [ ] Read chapter 2
+Important Dates
+ * 2026-12-01 — Final exam
+''');
+
+      expect(notes.concepts, hasLength(1));
+      expect(notes.tasks, hasLength(1));
+      expect(notes.deadlines, hasLength(1));
+    });
+
+    test('tolerates numbering, emoji and trailing colons', () {
+      final notes = NotesParser.parse('''
+## 1. Summary:
+It was a lecture.
+### 📌 Key Takeaways
+- Something important
+''');
+
+      expect(notes.summary, contains('lecture'));
+      expect(notes.concepts, hasLength(1));
+    });
+  });
+
   group('toggleTask', () {
     test('ticks an unticked item and leaves the rest alone', () {
       final notes = NotesParser.parse(wellFormed);

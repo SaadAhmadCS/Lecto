@@ -92,6 +92,23 @@ class StructuredNotesView extends StatelessWidget {
             label: 'Deadlines',
           ),
           ...notes.deadlines.map((deadline) => _DeadlineTile(deadline: deadline)),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        // Whatever the AI wrote under headings we don't know. Rendered last so
+        // nothing the student received is ever hidden from them.
+        for (final section in notes.extraSections) ...[
+          if (section.title.isNotEmpty)
+            _SectionHeader(
+              icon: Icons.notes_rounded,
+              label: section.title,
+            ),
+          if (section.body.isNotEmpty)
+            MarkdownBody(
+              data: section.body,
+              styleSheet: markdownStyle,
+              selectable: true,
+            ),
+          const SizedBox(height: AppSpacing.lg),
         ],
       ],
     );

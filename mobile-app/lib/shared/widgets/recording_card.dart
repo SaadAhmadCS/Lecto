@@ -227,6 +227,13 @@ class RecordingCard extends StatelessWidget {
         return _StatusInfo('Processing', AppColors.info, Icons.autorenew_rounded);
       case 'pending':
         return _StatusInfo('Queued', AppColors.warning, Icons.hourglass_empty_rounded);
+      // Kept on this device, waiting for the student's own AI app.
+      case 'awaiting_paste':
+        return _StatusInfo(
+          'Needs your AI',
+          AppColors.primary,
+          Icons.auto_awesome_rounded,
+        );
       case 'failed_transcription':
       case 'failed_assembly':
       case 'failed_summary':

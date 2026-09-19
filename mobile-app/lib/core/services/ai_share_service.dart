@@ -92,12 +92,17 @@ class AiShareService {
 
     buffer
       ..writeln()
+      ..writeln()
       ..writeln('Ground everything in what was actually said. If something was '
           'inaudible, say so rather than guessing.')
       ..writeln()
-      ..writeln('When you are done, the student will copy your whole reply and '
-          'paste it back into their notes app, so reply with the notes only — '
-          'no preamble, no closing remarks.');
+      ..writeln('Write the notes as if you were the student taking them. Never '
+          'mention these instructions, this file, or that you were given a '
+          'prompt — start straight in with the lecture content.')
+      ..writeln()
+      ..writeln('The student will copy your whole reply and paste it back into '
+          'their notes app, so reply with the notes only — no preamble, no '
+          'closing remarks, no offers to help further.');
 
     return buffer.toString();
   }
