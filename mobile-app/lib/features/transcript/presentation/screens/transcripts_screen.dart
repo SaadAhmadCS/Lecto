@@ -10,6 +10,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../features/recording/data/local/local_recording_feed.dart';
 import '../../../../features/recording/data/local/recording_dao.dart';
+import '../../../../features/recording/data/services/recording_deletion_service.dart';
 import '../../../../shared/widgets/recording_card.dart';
 
 /// Transcripts screen — view all recordings with their processing status.
@@ -27,6 +28,10 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
   late final LectoApiClient _api = context.read<LectoApiClient>();
   late final LocalRecordingFeed _localFeed =
       LocalRecordingFeed(dao: context.read<RecordingDao>());
+  late final RecordingDeletionService _deleter = RecordingDeletionService(
+    api: _api,
+    dao: context.read<RecordingDao>(),
+  );
   List<Map<String, dynamic>> _recordings = [];
   RecordingSort _sort = RecordingSort.date;
   bool _isLoading = true;
@@ -196,7 +201,14 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
                 builder: (context) => AlertDialog(
                   backgroundColor: AppColors.darkSurface,
                   title: const Text('Delete Recording'),
-                  content: const Text('Delete this recording? This will permanently remove the transcript and notes.'),
+                  content: Text(
+                    recording['isLocalOnly'] == true
+                        // Never uploaded, so there is no copy to fall back on.
+                        ? 'Delete this recording? The audio and notes are only '
+                            'on this device, so this cannot be undone.'
+                        : 'Delete this recording? This removes the audio from '
+                            'this device along with the transcript and notes.',
+                  ),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(false),
@@ -213,13 +225,13 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
             },
             onDismissed: (direction) async {
               try {
-                // A local-only recording was never sent, so deleting it on the
-                // backend would 404.
-                if (recording['isLocalOnly'] == true) {
-                  await context.read<RecordingDao>().deleteRecording(id);
-                } else {
-                  await _api.deleteRecording(id);
-                }
+                // Removes the backend row, the local rows and the audio on
+                // disk. A local-only recording was never sent, so asking the
+                // backend to delete it would 404.
+                await _deleter.delete(
+                  id,
+                  localOnly: recording['isLocalOnly'] == true,
+                );
                 setState(() {
                   // Remove by id: with a filter on, the visible index is not
                   // the index into _recordings.

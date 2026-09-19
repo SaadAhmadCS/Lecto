@@ -57,6 +57,30 @@ class RecordingDao {
     await db.update('recordings', updates, where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Rename or re-file a recording on this device.
+  ///
+  /// A recording captured in "my own AI app" mode has no backend row, so the
+  /// API cannot be the one to do this.
+  Future<void> updateRecordingDetails({
+    required String id,
+    String? title,
+    String? subjectId,
+  }) async {
+    if (title == null && subjectId == null) return;
+
+    final db = await RecordingDatabase.database;
+    await db.update(
+      'recordings',
+      {
+        if (title != null) 'title': title,
+        if (subjectId != null) 'subject_id': subjectId,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// Store notes for a recording on this device.
   ///
   /// Used both for notes pasted back from the student's own AI app and for

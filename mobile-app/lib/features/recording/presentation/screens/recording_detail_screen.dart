@@ -19,6 +19,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
 import '../../data/local/recording_dao.dart';
+import '../../data/services/recording_deletion_service.dart';
 import '../widgets/recording_audio_player.dart';
 import '../widgets/structured_notes_view.dart';
 import '../widgets/transcript_search.dart';
@@ -50,6 +51,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   late final UploadQueueService _uploadQueue = context
       .read<UploadQueueService>();
   late final RecordingDao _dao = context.read<RecordingDao>();
+  late final RecordingDeletionService _deleter = RecordingDeletionService(
+    api: _api,
+    dao: _dao,
+  );
   Timer? _pollTimer;
 
   /// Mode this recording was captured in. In [NotesSource.ownAiApp] the audio
@@ -512,7 +517,16 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     if (newTitle == null || newTitle.isEmpty || newTitle == _title) return;
 
     try {
-      await _api.updateRecording(widget.recordingId, title: newTitle);
+      // An own-AI recording exists only on this device, so the backend has no
+      // row to rename.
+      if (_isOwnAiMode) {
+        await _dao.updateRecordingDetails(
+          id: widget.recordingId,
+          title: newTitle,
+        );
+      } else {
+        await _api.updateRecording(widget.recordingId, title: newTitle);
+      }
       if (!mounted) return;
       setState(() => _title = newTitle);
       _showSnack('Recording renamed');
@@ -598,13 +612,23 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     if (target == null) return;
 
     try {
-      final response = await _api.updateRecording(
-        widget.recordingId,
-        subjectId: target['id'] as String,
-      );
-      final data = response['data'] as Map<String, dynamic>;
-      if (!mounted) return;
-      setState(() => _subject = data['subject'] as Map<String, dynamic>?);
+      // Same as rename: nothing to move on a backend that has never seen it.
+      if (_isOwnAiMode) {
+        await _dao.updateRecordingDetails(
+          id: widget.recordingId,
+          subjectId: target['id'] as String,
+        );
+        if (!mounted) return;
+        setState(() => _subject = target);
+      } else {
+        final response = await _api.updateRecording(
+          widget.recordingId,
+          subjectId: target['id'] as String,
+        );
+        final data = response['data'] as Map<String, dynamic>;
+        if (!mounted) return;
+        setState(() => _subject = data['subject'] as Map<String, dynamic>?);
+      }
       _showSnack('Moved to ${target['name']}');
     } catch (e) {
       _showSnack(ErrorMessages.from(e, action: 'move the recording'));
@@ -617,8 +641,13 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.darkSurface,
         title: const Text('Delete Recording'),
-        content: const Text(
-          'Delete this recording? This will permanently remove the transcript and notes.',
+        content: Text(
+          _isOwnAiMode
+              // Nothing was ever uploaded, so there is no copy to fall back on.
+              ? 'Delete this recording? The audio and notes are only on this '
+                  'device, so this cannot be undone.'
+              : 'Delete this recording? This removes the audio from this '
+                  'device along with the transcript and notes.',
         ),
         actions: [
           TextButton(
@@ -636,7 +665,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     if (confirm != true) return;
 
     try {
-      await _api.deleteRecording(widget.recordingId);
+      // Deletes the backend row, the local rows and the audio on disk. A
+      // recording captured in "my own AI app" mode has no backend row, so
+      // asking the API to delete it would 404.
+      await _deleter.delete(widget.recordingId, localOnly: _isOwnAiMode);
       if (!mounted) return;
       Navigator.of(context).pop();
       _showSnack('Recording deleted');
