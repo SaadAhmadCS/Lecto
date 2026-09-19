@@ -52,6 +52,46 @@ void main() {
       );
     });
 
+    test('tells a long lecture explicitly not to transcribe', () {
+      // Without this the model transcribes anyway and runs out of room for
+      // the notes, which is the failure this threshold exists to prevent.
+      final prompt =
+          AiShareService.buildPrompt(title: 'L', askForTranscript: false);
+
+      expect(prompt, contains('Do NOT include a transcript'));
+      expect(prompt, contains(AiShareService.summaryHeading));
+      expect(prompt, contains(AiShareService.tasksHeading));
+    });
+  });
+
+  group('shouldRequestTranscript', () {
+    test('asks for short lectures', () {
+      expect(
+        AiShareService.shouldRequestTranscript(const Duration(minutes: 12)),
+        isTrue,
+      );
+      expect(
+        AiShareService.shouldRequestTranscript(AiShareService.transcriptLimit),
+        isTrue,
+      );
+    });
+
+    test('does not ask once a lecture is long enough to overflow a reply', () {
+      expect(
+        AiShareService.shouldRequestTranscript(const Duration(minutes: 31)),
+        isFalse,
+      );
+      // The case that prompted this: a 3-hour lecture is ~24,000 words.
+      expect(
+        AiShareService.shouldRequestTranscript(const Duration(hours: 3)),
+        isFalse,
+      );
+    });
+
+    test('treats an unknown duration as short', () {
+      expect(AiShareService.shouldRequestTranscript(null), isTrue);
+    });
+
     test('requests exactly the headings the parser looks for', () {
       final prompt = AiShareService.buildPrompt(title: 'Lecture');
 

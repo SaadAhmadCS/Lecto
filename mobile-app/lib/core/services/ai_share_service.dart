@@ -16,6 +16,22 @@ class AiShareService {
   /// registers for PDF and text only, so audio silently goes nowhere.
   static const List<String> audioCapableApps = ['Claude', 'Gemini', 'Grok'];
 
+  /// Longest lecture we still ask for a transcript of.
+  ///
+  /// Speech runs about 130 words a minute, so 30 minutes is roughly 4,000
+  /// words — comfortably inside the reply length consumer AI apps allow. A
+  /// 3-hour lecture would be ~24,000 words, which they cannot return: the
+  /// model either truncates or spends its whole output budget transcribing
+  /// and returns thin notes. Above this we ask for notes only.
+  static const Duration transcriptLimit = Duration(minutes: 30);
+
+  /// Whether a lecture of [duration] is short enough to transcribe.
+  ///
+  /// An unknown duration is treated as short, since the common case for a
+  /// missing duration is a brief recording.
+  static bool shouldRequestTranscript(Duration? duration) =>
+      duration == null || duration <= transcriptLimit;
+
   /// Marker headings the reply must use so [parseAiReply] can find each part.
   static const String summaryHeading = '## Summary';
   static const String conceptsHeading = '## Key Concepts';
@@ -88,6 +104,16 @@ class AiShareService {
             'lecture is too long to transcribe in full, write '
             '"(too long to transcribe)" here instead and keep the sections '
             'above complete — those matter more.');
+    } else {
+      // Long lecture: a full transcript would not fit in one reply, and
+      // attempting it costs the notes their detail. Say so explicitly, or the
+      // model transcribes anyway.
+      buffer
+        ..writeln()
+        ..writeln('Do NOT include a transcript — this lecture is too long for '
+            'one. Spend that space on the sections above instead: cover every '
+            'topic the lecturer moved through, and be generous with the key '
+            'concepts rather than summarising them away.');
     }
 
     buffer

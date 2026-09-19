@@ -159,6 +159,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
         subjectName: _subject?['name'] as String?,
         recordingDate: _recordedAt,
         duration: _duration,
+        // A long lecture's transcript will not fit in one reply, and asking
+        // for it costs the notes their detail.
+        askForTranscript: AiShareService.shouldRequestTranscript(_duration),
       );
 
       final shared = await AiShareService.shareToAiApp(
@@ -1012,7 +1015,49 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
 
   Widget _buildTranscriptView() {
     if (_transcriptContent == null || _transcriptContent!.isEmpty) {
-      return const Center(child: Text('Transcript not available'));
+      // Explain rather than dead-end: in own-AI mode a long lecture is asked
+      // for notes only, because its transcript would not fit in one reply.
+      final skippedForLength = _isOwnAiMode &&
+          !AiShareService.shouldRequestTranscript(_duration);
+
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                skippedForLength
+                    ? Icons.speaker_notes_off_rounded
+                    : Icons.description_outlined,
+                size: 40,
+                color: AppColors.textTertiaryDark,
+              ),
+              const SizedBox(height: AppSpacing.base),
+              Text(
+                skippedForLength
+                    ? 'No transcript for long lectures'
+                    : 'Transcript not available',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              if (skippedForLength) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'A lecture this long will not fit in one AI reply, so Lecto '
+                  'asked for fuller notes instead. The audio is still on this '
+                  'device and can be played below.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiaryDark,
+                        height: 1.45,
+                      ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
 
     return Column(
