@@ -218,9 +218,9 @@ class AudioRecorderService {
     _currentChunkPath = '$_recordingsBasePath/$chunkFileName';
 
     const config = RecordConfig(
-      encoder: AudioEncoder.aacLc,
-      sampleRate: 44100,
-      bitRate: 128000,
+      encoder: AudioEncoder.aacHe,
+      sampleRate: AppConstants.audioSampleRate,
+      bitRate: AppConstants.audioBitRate,
       numChannels: 1, // Mono is fine for voice
     );
 

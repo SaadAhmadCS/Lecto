@@ -6,14 +6,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/constants/notes_source.dart';
 import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/upload_queue_service.dart';
+import '../../../../core/services/ai_share_service.dart';
+import '../../../../core/services/notes_parser.dart';
 import '../../../../core/services/processing_notifier.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
+import '../../data/local/recording_dao.dart';
 import '../widgets/recording_audio_player.dart';
+import '../widgets/structured_notes_view.dart';
 import '../widgets/transcript_search.dart';
 
 /// Recording Detail Screen — view processing status, transcript & summary.
@@ -42,7 +47,16 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   late final LectoApiClient _api = context.read<LectoApiClient>();
   late final UploadQueueService _uploadQueue = context
       .read<UploadQueueService>();
+  late final RecordingDao _dao = context.read<RecordingDao>();
   Timer? _pollTimer;
+
+  /// Mode this recording was captured in. In [NotesSource.ownAiApp] the audio
+  /// never reached the backend, so nothing here polls it.
+  NotesSource _captureSource = NotesSource.lectoAi;
+  ParsedNotes? _localNotes;
+  bool _isSharing = false;
+
+  bool get _isOwnAiMode => _captureSource == NotesSource.ownAiApp;
 
   // State
   String _processingStatus = 'pending';
@@ -72,8 +86,163 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     ProcessingNotifier.viewingRecordingId = widget.recordingId;
-    _fetchStatus();
+    _loadLocalThenFetch();
   }
+
+  /// Read what this device already knows before touching the network.
+  ///
+  /// Notes stored locally render straight away — including with no connection —
+  /// and a recording captured in "my own AI app" mode never polls the backend,
+  /// which has no row for it.
+  Future<void> _loadLocalThenFetch() async {
+    try {
+      final row = await _dao.getRecording(widget.recordingId);
+      final notes = await _dao.getNotes(widget.recordingId);
+
+      if (!mounted) return;
+      setState(() {
+        _captureSource =
+            NotesSource.fromCode(row?['capture_notes_source'] as String?);
+        if (notes != null) {
+          _localNotes = NotesParser.parse(notes.notesMarkdown);
+          _summaryContent = notes.notesMarkdown;
+          _transcriptContent ??= notes.transcriptMarkdown;
+        }
+        // The backend is the usual source of this metadata, but a recording
+        // that never uploaded only has the local row.
+        if (row != null) {
+          _title = row['title'] as String? ?? _title;
+          final durationMs = row['total_duration_ms'] as int?;
+          if (durationMs != null && durationMs > 0) {
+            _duration ??= Duration(milliseconds: durationMs);
+          }
+          _recordedAt ??= DateTime.tryParse(row['created_at'] as String? ?? '');
+        }
+      });
+    } catch (e) {
+      debugPrint('RecordingDetail: local load failed: $e');
+    }
+
+    if (_isOwnAiMode) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _processingStatus = _localNotes == null ? 'awaiting_paste' : 'completed';
+        });
+      }
+      return;
+    }
+
+    await _fetchStatus();
+  }
+
+  /// Send this recording's audio and the prompt to the student's AI app.
+  Future<void> _shareToAiApp() async {
+    if (_isSharing) return;
+    setState(() => _isSharing = true);
+
+    try {
+      final chunks = await _dao.getChunks(widget.recordingId);
+      final paths = chunks
+          .map((chunk) => chunk['file_path'] as String)
+          .toList(growable: false);
+
+      if (paths.isEmpty) {
+        _showSnack('This recording has no audio left on the device.');
+        return;
+      }
+
+      final prompt = AiShareService.buildPrompt(
+        title: _title,
+        subjectName: _subject?['name'] as String?,
+        recordingDate: _recordedAt,
+        duration: _duration,
+      );
+
+      final shared = await AiShareService.shareToAiApp(
+        audioPaths: paths,
+        prompt: prompt,
+        subjectLabel: _title,
+      );
+
+      if (!shared) {
+        _showSnack('Couldn\'t find the audio files for this recording.');
+      }
+    } catch (e) {
+      _showSnack(ErrorMessages.from(e, action: 'share this recording'));
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  /// Take the AI's reply off the clipboard and turn it into this recording's
+  /// notes.
+  Future<void> _pasteNotesFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+
+    if (text.isEmpty) {
+      _showSnack('Copy your AI\'s reply first, then tap Paste notes.');
+      return;
+    }
+    if (text.length < 40) {
+      _showSnack('That looks too short to be a set of notes.');
+      return;
+    }
+
+    final parsed = NotesParser.parse(text);
+
+    try {
+      await _dao.saveNotes(
+        id: widget.recordingId,
+        notesMarkdown: text,
+        notesSource: NotesSource.ownAiApp.code,
+        transcriptMarkdown: parsed.transcript,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _localNotes = parsed;
+        _summaryContent = text;
+        if (parsed.hasTranscript) _transcriptContent = parsed.transcript;
+        _processingStatus = 'completed';
+        _error = null;
+      });
+
+      _showSnack(
+        parsed.isStructured
+            ? 'Notes saved.'
+            : 'Notes saved, though they did not follow the expected format.',
+      );
+    } catch (e) {
+      _showSnack(ErrorMessages.from(e, action: 'save these notes'));
+    }
+  }
+
+  /// Tick or untick a task, rewriting the stored markdown so the change
+  /// survives a restart and flows through to PDF export.
+  Future<void> _toggleTask(NoteTask task) async {
+    final current = _summaryContent;
+    if (current == null) return;
+
+    final updated = NotesParser.toggleTask(current, task);
+    if (updated == current) return;
+
+    setState(() {
+      _summaryContent = updated;
+      _localNotes = NotesParser.parse(updated);
+    });
+
+    try {
+      await _dao.updateNotesMarkdown(
+        id: widget.recordingId,
+        notesMarkdown: updated,
+      );
+    } catch (e) {
+      debugPrint('RecordingDetail: failed to persist task toggle: $e');
+    }
+  }
+
 
   @override
   void dispose() {
@@ -313,6 +482,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
           ClipboardData(text: _summaryContent ?? _transcriptContent ?? ''),
         );
         _showSnack('Notes copied to clipboard');
+      case _DetailAction.shareToAi:
+        _shareToAiApp();
+      case _DetailAction.pasteNotes:
+        _pasteNotesFromClipboard();
       case _DetailAction.delete:
         _deleteRecording();
     }
@@ -551,6 +724,22 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
                           title: Text('Copy notes'),
                         ),
                       ),
+                    if (_isOwnAiMode) ...[
+                      const PopupMenuItem(
+                        value: _DetailAction.shareToAi,
+                        child: ListTile(
+                          leading: Icon(Icons.ios_share_rounded),
+                          title: Text('Share audio to your AI'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: _DetailAction.pasteNotes,
+                        child: ListTile(
+                          leading: Icon(Icons.content_paste_rounded),
+                          title: Text('Paste notes'),
+                        ),
+                      ),
+                    ],
                     const PopupMenuItem(
                       value: _DetailAction.delete,
                       child: ListTile(
@@ -602,6 +791,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       return _buildErrorState();
     }
 
+    if (_processingStatus == 'awaiting_paste') {
+      return _buildAwaitingPasteView();
+    }
+
     if (_processingStatus == 'completed') {
       return TabBarView(
         controller: _tabController,
@@ -614,6 +807,89 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     }
 
     return _buildProcessingView();
+  }
+
+  /// Shown for a recording captured in "my own AI app" mode that has no notes
+  /// yet. Walks the student through the round trip in the order they do it.
+  Widget _buildAwaitingPasteView() {
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      children: [
+        const SizedBox(height: AppSpacing.xxl),
+        Icon(
+          Icons.auto_awesome_rounded,
+          size: 56,
+          color: AppColors.primary.withValues(alpha: 0.8),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          'Make notes with your AI',
+          textAlign: TextAlign.center,
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'This recording stayed on your device. Send it to your own AI app, '
+          'then bring the reply back here.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.textTertiaryDark,
+                height: 1.5,
+              ),
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        const _StepRow(
+          number: '1',
+          text: 'Share the audio — the prompt goes with it as a file.',
+        ),
+        _StepRow(
+          number: '2',
+          text: 'Pick ${AiShareService.audioCapableApps.join(', ')}, wait for '
+              'the upload, then send.',
+        ),
+        const _StepRow(
+          number: '3',
+          text: 'Copy the whole reply and tap Paste notes below.',
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        FilledButton.icon(
+          onPressed: _isSharing ? null : _shareToAiApp,
+          icon: _isSharing
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.ios_share_rounded),
+          label: const Text('Share audio to your AI'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        OutlinedButton.icon(
+          onPressed: _pasteNotesFromClipboard,
+          icon: const Icon(Icons.content_paste_rounded),
+          label: const Text('Paste notes'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.base),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          'ChatGPT can\'t receive audio, so it won\'t appear in the share sheet '
+          'for this.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textTertiaryDark,
+              ),
+        ),
+      ],
+    );
   }
 
   Widget _buildProcessingView() {
@@ -705,11 +981,15 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
       return const Center(child: Text('Summary not available'));
     }
 
-    return Markdown(
-      data: _summaryContent!,
-      padding: const EdgeInsets.all(AppSpacing.base),
-      styleSheet: _markdownStyleSheet(context),
-      selectable: true,
+    // Notes that follow the expected shape get real UI — tickable tasks and a
+    // deadlines section. Anything else falls back to plain markdown inside
+    // StructuredNotesView, so nothing is ever hidden.
+    final parsed = _localNotes ?? NotesParser.parse(_summaryContent!);
+
+    return StructuredNotesView(
+      notes: parsed,
+      markdownStyle: _markdownStyleSheet(context),
+      onToggleTask: parsed.tasks.isEmpty ? null : _toggleTask,
     );
   }
 
@@ -974,7 +1254,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
   }
 }
 
-enum _DetailAction { rename, move, copy, delete }
+enum _DetailAction { rename, move, copy, shareToAi, pasteNotes, delete }
 
 /// Owns its controller so it's disposed only after the dialog's close
 /// animation finishes, not while the TextField is still on screen.
@@ -1020,6 +1300,51 @@ class _RenameRecordingDialogState extends State<_RenameRecordingDialog> {
           child: const Text('Save'),
         ),
       ],
+    );
+  }
+}
+
+/// One numbered step in the "make notes with your AI" walkthrough.
+class _StepRow extends StatelessWidget {
+  final String number;
+  final String text;
+
+  const _StepRow({required this.number, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              number,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    height: 1.45,
+                  ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

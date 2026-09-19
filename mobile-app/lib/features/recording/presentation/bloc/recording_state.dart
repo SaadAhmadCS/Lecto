@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../../core/constants/notes_source.dart';
 import '../../data/services/photo_capture_service.dart';
 
 /// States for the Recording BLoC.
@@ -144,6 +145,10 @@ class RecordingCompleted extends RecordingBlocState {
   final String recordingPath;
   final bool stoppedAtMaxDuration;
 
+  /// Mode this recording was captured in, so the confirmation screen does not
+  /// promise an upload that will never happen.
+  final NotesSource notesSource;
+
   const RecordingCompleted({
     required this.recordingId,
     required this.totalDuration,
@@ -151,6 +156,7 @@ class RecordingCompleted extends RecordingBlocState {
     required this.totalPhotos,
     required this.recordingPath,
     this.stoppedAtMaxDuration = false,
+    this.notesSource = NotesSource.lectoAi,
   });
 
   @override
@@ -161,6 +167,7 @@ class RecordingCompleted extends RecordingBlocState {
         totalPhotos,
         recordingPath,
         stoppedAtMaxDuration,
+        notesSource,
       ];
 }
 

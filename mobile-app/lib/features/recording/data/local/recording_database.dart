@@ -8,7 +8,7 @@ import 'package:sqflite/sqflite.dart';
 class RecordingDatabase {
   static Database? _database;
   static const String _dbName = 'lecto_recordings.db';
-  static const int _dbVersion = 2;
+  static const int _dbVersion = 3;
 
   /// Get the database instance, creating it if needed.
   static Future<Database> get database async {
@@ -41,7 +41,12 @@ class RecordingDatabase {
         total_duration_ms INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        synced INTEGER NOT NULL DEFAULT 0
+        synced INTEGER NOT NULL DEFAULT 0,
+        notes_markdown TEXT,
+        transcript_markdown TEXT,
+        notes_source TEXT,
+        notes_updated_at TEXT,
+        capture_notes_source TEXT
       )
     ''');
 
@@ -100,6 +105,27 @@ class RecordingDatabase {
   ) async {
     if (oldVersion < 2) {
       await _createUploadTasksTable(db);
+    }
+    if (oldVersion < 3) {
+      await _addLocalNotesColumns(db);
+    }
+  }
+
+  /// Notes and transcript kept on the device (v3).
+  ///
+  /// Needed for notes pasted back from the student's own AI app, and it also
+  /// means notes stay readable with no connection.
+  static Future<void> _addLocalNotesColumns(Database db) async {
+    for (final column in const [
+      'notes_markdown TEXT',
+      'transcript_markdown TEXT',
+      'notes_source TEXT',
+      'notes_updated_at TEXT',
+      // Which mode the recording was captured in, so crash recovery knows
+      // whether its audio was ever meant to be uploaded.
+      'capture_notes_source TEXT',
+    ]) {
+      await db.execute('ALTER TABLE recordings ADD COLUMN $column');
     }
   }
 

@@ -15,6 +15,7 @@ class RecordingDao {
     String status = 'recording',
     String audioFormat = 'aac',
     int chunkDurationMin = 15,
+    String? captureNotesSource,
   }) async {
     final db = await RecordingDatabase.database;
     final now = DateTime.now().toIso8601String();
@@ -32,6 +33,7 @@ class RecordingDao {
         'created_at': now,
         'updated_at': now,
         'synced': 0,
+        'capture_notes_source': captureNotesSource,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -53,6 +55,81 @@ class RecordingDao {
     if (synced != null) updates['synced'] = synced ? 1 : 0;
 
     await db.update('recordings', updates, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Store notes for a recording on this device.
+  ///
+  /// Used both for notes pasted back from the student's own AI app and for
+  /// caching backend notes so they stay readable offline. [transcriptMarkdown]
+  /// is optional — an AI app may return only notes for a long lecture.
+  Future<void> saveNotes({
+    required String id,
+    required String notesMarkdown,
+    required String notesSource,
+    String? transcriptMarkdown,
+  }) async {
+    final db = await RecordingDatabase.database;
+    final now = DateTime.now().toIso8601String();
+
+    final updates = <String, dynamic>{
+      'notes_markdown': notesMarkdown,
+      'notes_source': notesSource,
+      'notes_updated_at': now,
+      'updated_at': now,
+    };
+    if (transcriptMarkdown != null && transcriptMarkdown.isNotEmpty) {
+      updates['transcript_markdown'] = transcriptMarkdown;
+    }
+
+    await db.update('recordings', updates, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Replace just the notes body, keeping the source and transcript.
+  ///
+  /// Toggling a checklist item rewrites the markdown, so this runs on every tap.
+  Future<void> updateNotesMarkdown({
+    required String id,
+    required String notesMarkdown,
+  }) async {
+    final db = await RecordingDatabase.database;
+    await db.update(
+      'recordings',
+      {
+        'notes_markdown': notesMarkdown,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Locally stored notes for a recording, or null when there are none.
+  Future<LocalNotes?> getNotes(String id) async {
+    final db = await RecordingDatabase.database;
+    final rows = await db.query(
+      'recordings',
+      columns: [
+        'notes_markdown',
+        'transcript_markdown',
+        'notes_source',
+        'notes_updated_at',
+      ],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    final notes = row['notes_markdown'] as String?;
+    if (notes == null || notes.isEmpty) return null;
+
+    return LocalNotes(
+      notesMarkdown: notes,
+      transcriptMarkdown: row['transcript_markdown'] as String?,
+      source: row['notes_source'] as String? ?? 'unknown',
+      updatedAt: DateTime.tryParse(row['notes_updated_at'] as String? ?? ''),
+    );
   }
 
   /// Get a recording by ID.
@@ -237,4 +314,24 @@ class RecordingDao {
     }
     return counts;
   }
+}
+
+/// Notes held on this device for one recording.
+class LocalNotes {
+  final String notesMarkdown;
+  final String? transcriptMarkdown;
+
+  /// [NotesSource.code] of whatever produced these notes.
+  final String source;
+  final DateTime? updatedAt;
+
+  const LocalNotes({
+    required this.notesMarkdown,
+    required this.source,
+    this.transcriptMarkdown,
+    this.updatedAt,
+  });
+
+  bool get hasTranscript =>
+      transcriptMarkdown != null && transcriptMarkdown!.isNotEmpty;
 }

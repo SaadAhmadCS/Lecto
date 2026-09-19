@@ -401,10 +401,15 @@ class _RecordingScreenBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              state.stoppedAtMaxDuration
-                  ? 'Stopped automatically at the 8-hour limit.\n'
-                      'Notes are generated once the audio finishes uploading'
-                  : 'Notes are generated once the audio finishes uploading',
+              [
+                if (state.stoppedAtMaxDuration)
+                  'Stopped automatically at the 8-hour limit.',
+                // Nothing uploads in "my own AI app" mode, so don't promise it.
+                if (state.notesSource.uploadsAudio)
+                  'Notes are generated once the audio finishes uploading'
+                else
+                  'Share it to your AI app to get notes — tap View Notes',
+              ].join('\n'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,

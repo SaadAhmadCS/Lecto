@@ -154,4 +154,48 @@ void main() {
     expect(await recovery.recoverInterrupted(), isEmpty);
     expect(dao.recordings['rec-1']!['status'], 'completed');
   });
+
+  group('my own AI app mode', () {
+    test('a recovered recording is never queued for upload', () async {
+      dao.recordings['rec-1'] = {
+        'id': 'rec-1',
+        'title': 'Physics',
+        'status': 'recording',
+        'capture_notes_source': 'own_ai_app',
+      };
+      final chunk0 = await writeChunk('rec-1', 0);
+      dao.chunks['rec-1'] = [
+        {'sequence_number': 0, 'file_path': chunk0, 'duration_ms': 900000},
+      ];
+
+      final recovered = await recovery.recoverInterrupted();
+
+      // Still recovered and playable, just never sent anywhere.
+      expect(recovered, hasLength(1));
+      expect(dao.recordings['rec-1']!['status'], 'completed');
+      expect(await File(chunk0).exists(), isTrue);
+
+      connectivity.setOnline(true);
+      await waitFor(() => queue.pendingCount == 0);
+      expect(api.calls, isEmpty);
+    });
+
+    test('a recording with no usable audio is dropped without calling the '
+        'backend', () async {
+      dao.recordings['rec-1'] = {
+        'id': 'rec-1',
+        'title': 'Physics',
+        'status': 'recording',
+        'capture_notes_source': 'own_ai_app',
+      };
+
+      expect(await recovery.recoverInterrupted(), isEmpty);
+      expect(dao.recordings.containsKey('rec-1'), isFalse);
+
+      connectivity.setOnline(true);
+      await waitFor(() => queue.pendingCount == 0);
+      // No backend row was ever created, so there is nothing to delete.
+      expect(api.calls, isEmpty);
+    });
+  });
 }

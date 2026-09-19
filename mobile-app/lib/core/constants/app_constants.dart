@@ -9,8 +9,12 @@ class AppConstants {
   static const int defaultChunkDurationMinutes = 15;
   static const int minChunkDurationMinutes = 5;
   static const int maxChunkDurationMinutes = 30;
-  static const int audioSampleRate = 44100;
-  static const int audioBitRate = 128000;
+  // HE-AAC at 24kbps mono keeps a 3-hour lecture around 32MB instead of the
+  // ~173MB the old 128kbps setting produced. Speech survives this bitrate
+  // comfortably, Whisper accepts it, and the .m4a container is what the AI
+  // apps accept when a recording is shared out.
+  static const int audioSampleRate = 22050;
+  static const int audioBitRate = 24000;
 
   // REC-016: sessions stop automatically at 8 hours, with a warning 15 min before
   static const Duration maxRecordingDuration = Duration(hours: 8);

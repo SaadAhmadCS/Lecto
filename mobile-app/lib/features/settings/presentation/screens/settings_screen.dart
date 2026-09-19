@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
+import '../../../../core/constants/notes_source.dart';
 import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/session_service.dart';
@@ -49,7 +51,8 @@ class SettingsScreen extends StatelessWidget {
               _SettingsTile(
                 icon: Icons.audiotrack_rounded,
                 title: 'Audio Quality',
-                subtitle: 'High (AAC 128kbps)',
+                subtitle: 'Voice (HE-AAC '
+                    '${AppConstants.audioBitRate ~/ 1000}kbps mono)',
                 onTap: () {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -105,9 +108,10 @@ class SettingsScreen extends StatelessWidget {
             context,
             title: 'AI Processing',
             children: [
+              const _NotesSourceTile(),
               const _TranscriptionLanguageTile(),
               _SettingsTile(
-                icon: Icons.auto_awesome_rounded,
+                icon: Icons.bolt_rounded,
                 title: 'Auto-Process',
                 subtitle: 'Generate notes when recording stops',
                 trailing: Switch(
@@ -374,6 +378,89 @@ class _TranscriptionLanguageTileState
       title: 'Transcription Language',
       subtitle: '${_language.label} · applies to new recordings',
       onTap: _pickLanguage,
+    );
+  }
+}
+
+/// Picks where notes come from: our backend, or the student's own AI app.
+///
+/// Choosing [NotesSource.ownAiApp] means new recordings never upload, so it
+/// costs nothing and the audio stays on the device — but there is no Whisper
+/// transcript, which the dialog says plainly before the switch is made.
+class _NotesSourceTile extends StatefulWidget {
+  const _NotesSourceTile();
+
+  @override
+  State<_NotesSourceTile> createState() => _NotesSourceTileState();
+}
+
+class _NotesSourceTileState extends State<_NotesSourceTile> {
+  NotesSource _source = NotesSource.lectoAi;
+
+  @override
+  void initState() {
+    super.initState();
+    NotesSource.load().then((source) {
+      if (mounted) setState(() => _source = source);
+    });
+  }
+
+  Future<void> _pickSource() async {
+    final picked = await showDialog<NotesSource>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Notes source'),
+        children: [
+          RadioGroup<NotesSource>(
+            groupValue: _source,
+            onChanged: (value) => Navigator.of(ctx).pop(value),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final source in NotesSource.values)
+                  RadioListTile<NotesSource>(
+                    value: source,
+                    title: Text(source.label),
+                    subtitle: Text(source.description),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.base,
+            ),
+            child: Text(
+              'With your own AI app, recordings stay on this device and cost '
+              'nothing to process. There is no Whisper transcript, so Lecto '
+              'asks your AI for one along with the notes.',
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textTertiaryDark,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (picked == null || picked == _source) return;
+    await picked.save();
+    if (mounted) setState(() => _source = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsTile(
+      icon: Icons.auto_awesome_rounded,
+      title: 'Notes Source',
+      subtitle: _source == NotesSource.lectoAi
+          ? '${_source.label} · uploads audio for transcription'
+          : '${_source.label} · nothing leaves this device',
+      onTap: _pickSource,
     );
   }
 }

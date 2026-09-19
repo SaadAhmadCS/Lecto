@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../../core/constants/notes_source.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../local/recording_dao.dart';
 
@@ -44,7 +45,11 @@ class RecordingRecoveryService {
     for (final row in interrupted) {
       final id = row['id'] as String;
       try {
-        final result = await _recover(id, row['title'] as String? ?? 'Recording');
+        final result = await _recover(
+          id,
+          row['title'] as String? ?? 'Recording',
+          NotesSource.fromCode(row['capture_notes_source'] as String?),
+        );
         if (result != null) recovered.add(result);
       } catch (e) {
         debugPrint('RecordingRecovery: failed to recover $id: $e');
@@ -53,14 +58,22 @@ class RecordingRecoveryService {
     return recovered;
   }
 
-  Future<RecoveredRecording?> _recover(String id, String title) async {
+  Future<RecoveredRecording?> _recover(
+    String id,
+    String title,
+    NotesSource notesSource,
+  ) async {
     final saved = await _savedChunks(id);
     final dir = await _recordingDir(id);
 
     if (saved.isEmpty) {
       // Died before the first chunk finished: nothing usable to process.
       debugPrint('RecordingRecovery: $id has no finished audio, discarding');
-      _uploadQueue.enqueueDeleteRecording(recordingId: id);
+      // Nothing was ever sent in "my own AI app" mode, so there is no backend
+      // row to delete.
+      if (notesSource.uploadsAudio) {
+        _uploadQueue.enqueueDeleteRecording(recordingId: id);
+      }
       await _dao.deleteRecording(id);
       if (await dir.exists()) await dir.delete(recursive: true);
       return null;
@@ -74,11 +87,13 @@ class RecordingRecoveryService {
       status: 'completed',
       totalDurationMs: totalDurationMs,
     );
-    // Queued behind the chunks restored from the last run
-    _uploadQueue.enqueueCompleteRecording(
-      recordingId: id,
-      totalDurationMs: totalDurationMs,
-    );
+    if (notesSource.uploadsAudio) {
+      // Queued behind the chunks restored from the last run
+      _uploadQueue.enqueueCompleteRecording(
+        recordingId: id,
+        totalDurationMs: totalDurationMs,
+      );
+    }
 
     debugPrint(
       'RecordingRecovery: recovered $id '

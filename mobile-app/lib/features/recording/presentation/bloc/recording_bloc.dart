@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/errors/error_messages.dart';
+import '../../../../core/constants/notes_source.dart';
 import '../../../../core/constants/transcription_language.dart';
 import '../../../../core/network/upload_queue_service.dart';
 import '../../../../core/permissions/permission_service.dart';
@@ -48,6 +49,10 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
   String _currentTitle = '';
   bool _isNearMaxDuration = false;
   bool _stoppedAtMaxDuration = false;
+
+  /// Notes source for the recording in flight, read once when it starts so a
+  /// mid-recording settings change cannot leave it half uploaded.
+  NotesSource _notesSource = NotesSource.lectoAi;
 
   RecordingBloc({
     required AudioRecorderService recorderService,
@@ -104,6 +109,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
     _reportedChunkDurationMs = 0;
     _isNearMaxDuration = false;
     _stoppedAtMaxDuration = false;
+    _notesSource = await NotesSource.load();
     _photoService.reset();
 
     // Persist recording to local DB (crash recovery)
@@ -112,6 +118,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
         id: recordingId,
         subjectId: event.subjectId,
         title: _currentTitle,
+        captureNotesSource: _notesSource.code,
       );
     } catch (e) {
       debugPrint('RecordingBloc: Failed to persist recording locally: $e');
@@ -144,14 +151,18 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
     // startRecording reports permission/storage failures via an error event
     if (!_recorderService.isRecording) return;
 
-    // Register on the backend through the sync queue — runs now if online,
-    // otherwise when connectivity returns. Chunks queue up behind it.
-    _uploadQueue.enqueueCreateRecording(
-      recordingId: recordingId,
-      subjectId: event.subjectId,
-      title: _currentTitle,
-      language: (await TranscriptionLanguage.load()).code,
-    );
+    // In "my own AI app" mode the audio never leaves the device, so nothing
+    // is registered on the backend and no chunk is ever queued.
+    if (_notesSource.uploadsAudio) {
+      // Register on the backend through the sync queue — runs now if online,
+      // otherwise when connectivity returns. Chunks queue up behind it.
+      _uploadQueue.enqueueCreateRecording(
+        recordingId: recordingId,
+        subjectId: event.subjectId,
+        title: _currentTitle,
+        language: (await TranscriptionLanguage.load()).code,
+      );
+    }
 
     emit(RecordingInProgress(recordingId: recordingId));
   }
@@ -250,12 +261,14 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       debugPrint('RecordingBloc: Failed to update recording in DB: $e');
     }
 
-    // Queued behind the final chunk, so AI processing only starts once
-    // every chunk has reached the backend.
-    _uploadQueue.enqueueCompleteRecording(
-      recordingId: result.recordingId,
-      totalDurationMs: durationMs,
-    );
+    if (_notesSource.uploadsAudio) {
+      // Queued behind the final chunk, so AI processing only starts once
+      // every chunk has reached the backend.
+      _uploadQueue.enqueueCompleteRecording(
+        recordingId: result.recordingId,
+        totalDurationMs: durationMs,
+      );
+    }
 
     emit(RecordingCompleted(
       recordingId: result.recordingId,
@@ -264,6 +277,7 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
       totalPhotos: _photoService.photos.length,
       recordingPath: result.recordingPath,
       stoppedAtMaxDuration: _stoppedAtMaxDuration,
+      notesSource: _notesSource,
     ));
   }
 
@@ -363,15 +377,17 @@ class RecordingBloc extends Bloc<RecordingBlocEvent, RecordingBlocState> {
   }) async {
     _reportedChunkDurationMs += durationMs;
 
-    // Enqueue before the async DB write so chunk order in the queue
-    // matches recording order.
-    _uploadQueue.enqueueChunk(
-      recordingId: recordingId,
-      chunkFilePath: filePath,
-      sequenceNumber: chunkIndex,
-      durationMs: durationMs,
-      sizeBytes: sizeBytes,
-    );
+    if (_notesSource.uploadsAudio) {
+      // Enqueue before the async DB write so chunk order in the queue
+      // matches recording order.
+      _uploadQueue.enqueueChunk(
+        recordingId: recordingId,
+        chunkFilePath: filePath,
+        sequenceNumber: chunkIndex,
+        durationMs: durationMs,
+        sizeBytes: sizeBytes,
+      );
+    }
 
     try {
       await _recordingDao.insertChunk(
