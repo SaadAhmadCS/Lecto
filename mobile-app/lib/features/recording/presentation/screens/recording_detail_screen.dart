@@ -20,6 +20,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/export_options_sheet.dart';
 import '../../data/local/recording_dao.dart';
 import '../../data/services/recording_deletion_service.dart';
+import '../widgets/paste_notes_sheet.dart';
 import '../widgets/recording_audio_player.dart';
 import '../widgets/structured_notes_view.dart';
 import '../widgets/transcript_search.dart';
@@ -201,6 +202,17 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     }
 
     final parsed = NotesParser.parse(text);
+
+    if (!mounted) return;
+    // Show what is about to be saved first. A stray tap used to overwrite a
+    // lecture's notes with whatever happened to be on the clipboard.
+    final confirmed = await PasteNotesSheet.show(
+      context,
+      notes: parsed,
+      markdownStyle: _markdownStyleSheet(context),
+      replacesExisting: _localNotes != null,
+    );
+    if (!confirmed || !mounted) return;
 
     try {
       await _dao.saveNotes(
