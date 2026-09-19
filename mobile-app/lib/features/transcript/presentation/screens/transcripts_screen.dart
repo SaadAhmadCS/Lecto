@@ -32,6 +32,20 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
   bool _isLoading = true;
   String? _error;
 
+  /// Show only recordings still waiting to be sent to the student's own AI.
+  ///
+  /// Once someone has a term's worth of lectures, the handful that still need
+  /// them is what they actually came to the list for.
+  bool _onlyAwaiting = false;
+
+  static bool _isAwaiting(Map<String, dynamic> recording) =>
+      recording['processingStatus'] == 'awaiting_paste';
+
+  int get _awaitingCount => _recordings.where(_isAwaiting).length;
+
+  List<Map<String, dynamic>> get _visibleRecordings =>
+      _onlyAwaiting ? _recordings.where(_isAwaiting).toList() : _recordings;
+
   @override
   void initState() {
     super.initState();
@@ -111,15 +125,58 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
       return _buildEmptyState();
     }
 
+    return Column(
+      children: [
+        if (_awaitingCount > 0) _buildFilterBar(),
+        Expanded(child: _buildList()),
+      ],
+    );
+  }
+
+  /// Only shown when something is actually waiting, so the list stays plain
+  /// for anyone not using their own AI app.
+  Widget _buildFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.base,
+        AppSpacing.sm,
+        AppSpacing.base,
+        0,
+      ),
+      child: Row(
+        children: [
+          ChoiceChip(
+            label: const Text('All'),
+            selected: !_onlyAwaiting,
+            selectedColor: AppColors.primary,
+            onSelected: (_) => setState(() => _onlyAwaiting = false),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          ChoiceChip(
+            // No avatar: a selected chip already draws a checkmark there, and
+            // the two icons collide.
+            label: Text('Needs your AI · $_awaitingCount'),
+            selected: _onlyAwaiting,
+            selectedColor: AppColors.primary,
+            onSelected: (_) => setState(() => _onlyAwaiting = true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    final visible = _visibleRecordings;
+
     return RefreshIndicator(
       color: AppColors.primary,
       onRefresh: _loadRecordings,
       child: ListView.separated(
         padding: const EdgeInsets.all(AppSpacing.base),
-        itemCount: _recordings.length,
+        itemCount: visible.length,
         separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, index) {
-          final recording = _recordings[index];
+          final recording = visible[index];
           final id = recording['id'] as String;
           return Dismissible(
             key: Key(id),
@@ -164,7 +221,9 @@ class _TranscriptsScreenState extends State<TranscriptsScreen> {
                   await _api.deleteRecording(id);
                 }
                 setState(() {
-                  _recordings.removeAt(index);
+                  // Remove by id: with a filter on, the visible index is not
+                  // the index into _recordings.
+                  _recordings.removeWhere((r) => r['id'] == id);
                 });
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

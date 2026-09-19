@@ -6,6 +6,8 @@ import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../recording/data/local/local_recording_feed.dart';
+import '../../../recording/data/local/recording_dao.dart';
 import '../../../../shared/widgets/recording_card.dart';
 
 /// Subject detail — all recordings in one subject (ORG-004).
@@ -20,6 +22,8 @@ class SubjectDetailScreen extends StatefulWidget {
 
 class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   late final LectoApiClient _api = context.read<LectoApiClient>();
+  late final LocalRecordingFeed _localFeed =
+      LocalRecordingFeed(dao: context.read<RecordingDao>());
 
   Map<String, dynamic>? _subject;
   List<Map<String, dynamic>> _recordings = [];
@@ -35,6 +39,10 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   }
 
   Future<void> _load() async {
+    // Recordings kept on this device are not on the backend, so this subject
+    // would otherwise report "0 recordings" while holding several.
+    final local = await _localFeed.list(subjectId: widget.subjectId);
+
     try {
       final results = await Future.wait([
         _api.getSubject(widget.subjectId),
@@ -44,12 +52,14 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       final recordings =
           (results[1]['data'] as List<dynamic>).cast<Map<String, dynamic>>();
       final meta = results[1]['meta'] as Map<String, dynamic>?;
+      final merged = LocalRecordingFeed.merge(recordings, local);
 
       if (!mounted) return;
       setState(() {
         _subject = results[0]['data'] as Map<String, dynamic>;
-        _recordings = _sort.apply(recordings);
-        _totalRecordings = meta?['total'] as int? ?? recordings.length;
+        _recordings = _sort.apply(merged);
+        _totalRecordings =
+            (meta?['total'] as int? ?? recordings.length) + local.length;
         _isLoading = false;
         _error = null;
       });

@@ -59,6 +59,55 @@ class LocalRecordingFeed {
     }
   }
 
+  /// How many on-device recordings each subject holds, keyed by subject id.
+  ///
+  /// The subjects grid takes its counts from the backend, which has never seen
+  /// these, so a subject full of them would otherwise read "0 recordings".
+  Future<Map<String, int>> countsBySubject() async {
+    try {
+      final rows = await _dao.listRecordings();
+      final counts = <String, int>{};
+
+      for (final row in rows) {
+        final source =
+            NotesSource.fromCode(row['capture_notes_source'] as String?);
+        if (source.uploadsAudio) continue;
+
+        final subjectId = row['subject_id'] as String?;
+        if (subjectId == null) continue;
+        counts[subjectId] = (counts[subjectId] ?? 0) + 1;
+      }
+
+      return counts;
+    } catch (e) {
+      debugPrint('LocalRecordingFeed: failed to count local recordings: $e');
+      return const {};
+    }
+  }
+
+  /// Add on-device counts into subject rows fetched from the backend.
+  ///
+  /// Returns new rows; the input list is left untouched.
+  static List<Map<String, dynamic>> withLocalCounts(
+    List<Map<String, dynamic>> subjects,
+    Map<String, int> localCounts,
+  ) {
+    if (localCounts.isEmpty) return subjects;
+
+    return subjects.map((subject) {
+      final extra = localCounts[subject['id'] as String?] ?? 0;
+      if (extra == 0) return subject;
+
+      final counts = subject['_count'] as Map<String, dynamic>?;
+      final remote = counts?['recordings'] as int? ?? 0;
+
+      return {
+        ...subject,
+        '_count': {...?counts, 'recordings': remote + extra},
+      };
+    }).toList();
+  }
+
   /// Merge on-device recordings into a list fetched from the backend.
   ///
   /// Backend rows win on ID collision, which can only happen if a recording was

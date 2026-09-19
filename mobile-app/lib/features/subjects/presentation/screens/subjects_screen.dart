@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/errors/error_messages.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../recording/data/local/local_recording_feed.dart';
+import '../../../recording/data/local/recording_dao.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 
@@ -21,6 +23,8 @@ class SubjectsScreen extends StatefulWidget {
 
 class _SubjectsScreenState extends State<SubjectsScreen> {
   late final LectoApiClient _api = context.read<LectoApiClient>();
+  late final LocalRecordingFeed _localFeed =
+      LocalRecordingFeed(dao: context.read<RecordingDao>());
   List<Map<String, dynamic>> _subjects = [];
   bool _isLoading = true;
   bool _hasError = false;
@@ -53,6 +57,10 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       _hasError = false;
     });
 
+    // Recordings kept on this device are invisible to the backend, so their
+    // subjects would report a count that ignores them.
+    final localCounts = await _localFeed.countsBySubject();
+
     try {
       final response = await _api.listSubjects();
       final subjects = (response['data'] as List<dynamic>)
@@ -60,7 +68,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
       if (mounted) {
         setState(() {
-          _subjects = subjects;
+          _subjects = LocalRecordingFeed.withLocalCounts(subjects, localCounts);
           _isLoading = false;
         });
       }

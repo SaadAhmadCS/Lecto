@@ -30,6 +30,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   bool _hasError = false;
 
+  /// Recordings kept on this device that still need the student's own AI.
+  int _awaitingCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +43,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // Recordings kept on this device never reach the backend, so they have to
     // be merged in or they would not appear anywhere.
     final local = await _localFeed.list();
+    final awaiting =
+        local.where((r) => r['processingStatus'] == 'awaiting_paste').length;
 
     try {
       final response = await _api.listRecordings(limit: 5);
@@ -53,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _recentRecordings = merged.take(5).toList();
           _totalRecordings =
               (meta?['total'] as int? ?? recordings.length) + local.length;
+          _awaitingCount = awaiting;
           _isLoading = false;
           _hasError = false;
         });
@@ -63,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // Offline is not empty when there are recordings on the device.
           _recentRecordings = local.take(5).toList();
           _totalRecordings = local.length;
+          _awaitingCount = awaiting;
           _isLoading = false;
           _hasError = local.isEmpty;
         });
@@ -123,6 +130,10 @@ class _HomeScreenState extends State<HomeScreen> {
             else if (_recentRecordings.isEmpty)
               _buildEmptyHint()
             else ...[
+              if (_awaitingCount > 0) ...[
+                _buildAwaitingCard(context),
+                const SizedBox(height: AppSpacing.xl),
+              ],
               _buildStatsRow(context),
               const SizedBox(height: AppSpacing.xl),
               _buildSectionHeader(context, 'Recent Recordings'),
@@ -155,6 +166,65 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Nudge for recordings sitting on this device with no notes yet.
+  ///
+  /// Nothing else will surface them — no upload, no processing, no
+  /// notification — so without this they quietly pile up unnoticed.
+  Widget _buildAwaitingCard(BuildContext context) {
+    final label = _awaitingCount == 1
+        ? '1 recording needs your AI'
+        : '$_awaitingCount recordings need your AI';
+
+    return InkWell(
+      onTap: () => context.go('/transcripts'),
+      borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.base),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.35),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.auto_awesome_rounded,
+              color: AppColors.primary,
+              size: 22,
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Share the audio to your AI app, then paste the reply back',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondaryDark,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiaryDark,
+            ),
           ],
         ),
       ),
@@ -501,6 +571,7 @@ class _RecentRecordingTile extends StatelessWidget {
 
   Color _statusColor(String s) {
     if (s == 'completed') return AppColors.success;
+    if (s == 'awaiting_paste') return AppColors.primary;
     if (s.startsWith('failed')) return AppColors.error;
     if (s == 'transcribing' || s == 'summarizing' || s == 'assembling') {
       return AppColors.info;
@@ -510,6 +581,7 @@ class _RecentRecordingTile extends StatelessWidget {
 
   IconData _statusIcon(String s) {
     if (s == 'completed') return Icons.check_circle_rounded;
+    if (s == 'awaiting_paste') return Icons.auto_awesome_rounded;
     if (s.startsWith('failed')) return Icons.error_outline_rounded;
     if (s == 'transcribing' || s == 'summarizing' || s == 'assembling') {
       return Icons.autorenew_rounded;
