@@ -6,7 +6,20 @@ class AppConstants {
   static const String appTagline = 'Never miss a word.';
 
   // Recording
-  static const int defaultChunkDurationMinutes = 15;
+  /// Minutes of audio per chunk.
+  ///
+  /// 20 rather than 15 so a 3-hour lecture is 9 chunks. AI apps take 10 files
+  /// per prompt — one of which is the prompt itself — so 15-minute chunks made
+  /// a 3-hour lecture unshareable in one go. 3 hours is also Gemini's own
+  /// audio ceiling, so this covers everything it can accept.
+  ///
+  /// Overridable so a long lecture's chunk count can be reproduced in minutes
+  /// rather than hours:
+  /// `flutter run --dart-define=CHUNK_MINUTES=1`
+  static const int defaultChunkDurationMinutes = int.fromEnvironment(
+    'CHUNK_MINUTES',
+    defaultValue: 20,
+  );
   static const int minChunkDurationMinutes = 5;
   static const int maxChunkDurationMinutes = 30;
   // HE-AAC at 24kbps mono keeps a 3-hour lecture around 32MB instead of the

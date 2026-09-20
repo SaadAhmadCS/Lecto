@@ -160,6 +160,12 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
         return;
       }
 
+      // AI apps take 10 files and drop the rest without saying so. Say so.
+      if (paths.length > AiShareService.maxAudioFilesPerShare &&
+          !await _confirmPartialShare(chunks)) {
+        return;
+      }
+
       final prompt = AiShareService.buildPrompt(
         title: _title,
         subjectName: _subject?['name'] as String?,
@@ -184,6 +190,61 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen>
     } finally {
       if (mounted) setState(() => _isSharing = false);
     }
+  }
+
+  /// Warn that only the start of a long lecture will reach the AI app.
+  ///
+  /// Without this the app quietly keeps the first ten files and discards the
+  /// rest, so a student would get notes covering part of a lecture with
+  /// nothing telling them the end was missing.
+  Future<bool> _confirmPartialShare(List<Map<String, dynamic>> chunks) async {
+    // Measure the audio actually being sent rather than assuming every chunk
+    // is the configured length — the last one never is, and an older
+    // recording may have been cut at a different length entirely.
+    int msOf(Iterable<Map<String, dynamic>> rows) => rows.fold<int>(
+          0,
+          (sum, row) => sum + ((row['duration_ms'] as int?) ?? 0),
+        );
+
+    final sentMs = msOf(chunks.take(AiShareService.maxAudioFilesPerShare));
+    final totalMs = msOf(chunks);
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.darkSurface,
+        title: const Text('Lecture is too long to send at once'),
+        content: Text(
+          'AI apps accept ${AiShareService.maxFilesPerShare} files per chat, '
+          'and this recording is ${chunks.length} parts.\n\n'
+          'Only the first ${_formatDuration(sentMs)} of '
+          '${_formatDuration(totalMs)} will be sent. The rest stays on your '
+          'device — you can play it here, but it will not reach your AI.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Send the first part'),
+          ),
+        ],
+      ),
+    );
+    return proceed ?? false;
+  }
+
+  static String _formatDuration(int milliseconds) {
+    final duration = Duration(milliseconds: milliseconds);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    if (hours > 0) {
+      return minutes == 0 ? '$hours hr' : '$hours hr $minutes min';
+    }
+    if (minutes > 0) return '$minutes min';
+    return '${duration.inSeconds} sec';
   }
 
   /// Take the AI's reply off the clipboard and turn it into this recording's

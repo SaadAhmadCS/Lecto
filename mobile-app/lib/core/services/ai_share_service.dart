@@ -16,6 +16,16 @@ class AiShareService {
   /// registers for PDF and text only, so audio silently goes nowhere.
   static const List<String> audioCapableApps = ['Claude', 'Gemini', 'Grok'];
 
+  /// Most files an AI app will take in one prompt.
+  ///
+  /// Gemini accepts 10 and silently discards the rest — verified on device:
+  /// a 13-file share arrived as 10, with the last two chunks and the prompt
+  /// missing and no warning to the student.
+  static const int maxFilesPerShare = 10;
+
+  /// Audio files per share, leaving one slot for the prompt.
+  static const int maxAudioFilesPerShare = maxFilesPerShare - 1;
+
   /// Longest lecture we still ask for a transcript of.
   ///
   /// Speech runs about 130 words a minute, so 30 minutes is roughly 4,000
@@ -144,25 +154,33 @@ class AiShareService {
   /// Open the system share sheet with the audio and the prompt.
   ///
   /// [audioPaths] should be in playback order; filenames carry that order to
-  /// the AI app. Returns false when nothing could be shared.
+  /// the AI app. Anything past [maxAudioFilesPerShare] is left out — the
+  /// receiving app would drop it anyway, but silently. Returns false when
+  /// nothing could be shared.
   static Future<bool> shareToAiApp({
     required List<String> audioPaths,
     required String prompt,
     String? subjectLabel,
   }) async {
-    final existing = <XFile>[];
-    for (final path in audioPaths) {
+    final audio = <XFile>[];
+    for (final path in audioPaths.take(maxAudioFilesPerShare)) {
       if (await File(path).exists()) {
-        existing.add(XFile(path, mimeType: 'audio/mp4'));
+        audio.add(XFile(path, mimeType: 'audio/mp4'));
       } else {
         debugPrint('AiShareService: missing audio chunk $path');
       }
     }
 
-    if (existing.isEmpty) return false;
+    if (audio.isEmpty) return false;
 
+    // The prompt goes FIRST. When an app trims to its file limit it keeps the
+    // earliest, so putting the prompt last meant the instructions were the
+    // first thing thrown away.
     final promptFile = await writePromptFile(prompt);
-    existing.add(XFile(promptFile.path, mimeType: 'text/plain'));
+    final existing = <XFile>[
+      XFile(promptFile.path, mimeType: 'text/plain'),
+      ...audio,
+    ];
 
     await SharePlus.instance.share(
       ShareParams(

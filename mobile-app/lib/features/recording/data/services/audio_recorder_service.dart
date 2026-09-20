@@ -55,10 +55,10 @@ class AudioRecorderService {
   ///
   /// Creates a directory for this recording and begins capturing audio.
   /// [recordingId] — unique ID for this recording session.
-  /// [chunkMinutes] — minutes per chunk (default 15, adjusted if storage low).
+  /// [chunkMinutes] — minutes per chunk, adjusted down if storage is low.
   Future<void> startRecording(
     String recordingId, {
-    int chunkMinutes = 15,
+    int chunkMinutes = AppConstants.defaultChunkDurationMinutes,
   }) async {
     if (_isRecording) {
       throw StateError('Already recording. Stop current recording first.');
