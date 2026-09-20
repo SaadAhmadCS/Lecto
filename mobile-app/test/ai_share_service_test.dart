@@ -142,8 +142,9 @@ void main() {
 
   group('file limits', () {
     test('leaves a slot for the prompt', () {
-      // Verified on device: Gemini takes 10 files and silently drops the rest,
-      // so 9 audio files plus the prompt is the most that survives.
+      // Only reached when merging is unavailable. Verified on device: Gemini
+      // takes 10 files and silently drops the rest, so 9 audio files plus the
+      // prompt is the most that survives.
       expect(AiShareService.maxFilesPerShare, 10);
       expect(
         AiShareService.maxAudioFilesPerShare,
@@ -151,18 +152,10 @@ void main() {
       );
     });
 
-    test('a 3-hour lecture fits in one share at the current chunk length', () {
-      // The reason chunks are 20 minutes: at 15 they were 12 files and a
-      // 3-hour lecture could not be shared whole.
-      const threeHours = 180;
-      final chunks =
-          (threeHours / AppConstants.defaultChunkDurationMinutes).ceil();
-
-      expect(
-        chunks,
-        lessThanOrEqualTo(AiShareService.maxAudioFilesPerShare),
-        reason: '$chunks chunks would exceed the share limit',
-      );
+    test('chunk length no longer has to satisfy the share limit', () {
+      // Chunks are merged into one file before sharing, so chunk length is
+      // free to be chosen for crash safety alone.
+      expect(AppConstants.defaultChunkDurationMinutes, greaterThan(0));
     });
   });
 

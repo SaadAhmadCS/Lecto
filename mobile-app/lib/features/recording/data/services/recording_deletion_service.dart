@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/services/audio_merge_service.dart';
 import '../local/recording_dao.dart';
 
 /// Deletes a recording everywhere it exists.
@@ -74,5 +75,9 @@ class RecordingDeletionService {
     } catch (e) {
       debugPrint('RecordingDeletion: could not delete audio: $e');
     }
+
+    // The merged copy made for sharing lives in the cache directory, so it
+    // would otherwise outlive the recording it came from.
+    await AudioMergeService.clearCache(recordingId);
   }
 }

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'audio_merge_service.dart';
+
 /// Shares a recording's audio into whichever AI app the student uses.
 ///
 /// Android drops `EXTRA_TEXT` when a file is attached in most receiving apps,
@@ -153,21 +155,33 @@ class AiShareService {
 
   /// Open the system share sheet with the audio and the prompt.
   ///
-  /// [audioPaths] should be in playback order; filenames carry that order to
-  /// the AI app. Anything past [maxAudioFilesPerShare] is left out — the
-  /// receiving app would drop it anyway, but silently. Returns false when
-  /// nothing could be shared.
+  /// [audioPaths] should be in playback order. They are merged into a single
+  /// file first, so a lecture always arrives as one attachment however long it
+  /// ran — receiving apps cap the number of files and drop the rest silently.
+  /// If merging is unavailable the chunks are shared individually, trimmed to
+  /// [maxAudioFilesPerShare]. Returns false when nothing could be shared.
   static Future<bool> shareToAiApp({
+    required String recordingId,
     required List<String> audioPaths,
     required String prompt,
     String? subjectLabel,
   }) async {
+    final merged = await AudioMergeService.mergeForSharing(
+      recordingId: recordingId,
+      chunkPaths: audioPaths,
+    );
+
     final audio = <XFile>[];
-    for (final path in audioPaths.take(maxAudioFilesPerShare)) {
-      if (await File(path).exists()) {
-        audio.add(XFile(path, mimeType: 'audio/mp4'));
-      } else {
-        debugPrint('AiShareService: missing audio chunk $path');
+    if (merged != null) {
+      audio.add(XFile(merged.path, mimeType: 'audio/mp4'));
+    } else {
+      // Fallback: the receiving app will keep only the first few.
+      for (final path in audioPaths.take(maxAudioFilesPerShare)) {
+        if (await File(path).exists()) {
+          audio.add(XFile(path, mimeType: 'audio/mp4'));
+        } else {
+          debugPrint('AiShareService: missing audio chunk $path');
+        }
       }
     }
 
